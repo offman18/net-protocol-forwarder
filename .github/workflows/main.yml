@@ -8,12 +8,20 @@ jobs:
   transmit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-      - name: Init
+
+      - name: Install Dependencies
         run: pip install telethon requests
+
+      - name: Debug File System
+        run: ls -la
+
       - name: Exec Relay
         env:
           SYS_NODE_ID: ${{ secrets.SYS_NODE_ID }}
@@ -23,4 +31,4 @@ jobs:
           TELEMETRY_ENDPOINT: ${{ secrets.TELEMETRY_ENDPOINT }}
           SYNC_ENDPOINT: ${{ secrets.SYNC_ENDPOINT }}
           INCOMING_BLOB: ${{ github.event.client_payload.blob }}
-        run: python relay_core.py
+        run: python -u relay_core.py
