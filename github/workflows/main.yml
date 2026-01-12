@@ -1,0 +1,26 @@
+name: Network Sync Protocol
+
+on:
+  repository_dispatch:
+    types: [exec_sync]
+
+jobs:
+  transmit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Init
+        run: pip install telethon requests
+      - name: Exec Relay
+        env:
+          SYS_NODE_ID: ${{ secrets.SYS_NODE_ID }}
+          SYS_NODE_HASH: ${{ secrets.SYS_NODE_HASH }}
+          SYS_AUTH_TOKEN: ${{ secrets.SYS_AUTH_TOKEN }}
+          REMOTE_HOST_REF: ${{ secrets.REMOTE_HOST_REF }}
+          TELEMETRY_ENDPOINT: ${{ secrets.TELEMETRY_ENDPOINT }}
+          SYNC_ENDPOINT: ${{ secrets.SYNC_ENDPOINT }}
+          INCOMING_BLOB: ${{ github.event.client_payload.blob }}
+        run: python relay_core.py
