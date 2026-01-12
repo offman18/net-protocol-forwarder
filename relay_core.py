@@ -7,85 +7,108 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 # ==========================================
-# 🛠️ AUTO-FIX & RELAY CORE
+# 🔌 NET PROTOCOL SYNC CORE (v2.1)
 # ==========================================
 
-# 1. טעינת משתנים
-CONF = {
+# Loading environment configuration
+NET_CFG = {
     'nid': int(os.environ.get('SYS_NODE_ID', 0)),
     'hash': os.environ.get('SYS_NODE_HASH', ''),
-    'token': os.environ.get('SYS_AUTH_TOKEN', '').strip(), # מנקה רווחים
-    'dest': os.environ.get('REMOTE_HOST_REF', ''),
-    'uplink': os.environ.get('TELEMETRY_ENDPOINT', ''),
-    'downlink': os.environ.get('SYNC_ENDPOINT', ''),
-    'blob': os.environ.get('INCOMING_BLOB', '')
+    'auth': os.environ.get('SYS_AUTH_TOKEN', '').strip(),
+    'target': os.environ.get('REMOTE_HOST_REF', ''),
+    'telemetry': os.environ.get('TELEMETRY_ENDPOINT', ''),
+    'webhook': os.environ.get('SYNC_ENDPOINT', ''),
+    'payload': os.environ.get('INCOMING_BLOB', '')
 }
 
-# 2. 🚑 תיקון אוטומטי למפתח השבור
-# אם האורך לא מתחלק ב-4, אנחנו מוסיפים '=' ידנית
-padding = len(CONF['token']) % 4
-if padding != 0:
-    CONF['token'] += '=' * (4 - padding)
-    print(f"LOG: Auto-fixed token padding. Added {4-padding} chars.")
+# [Security] Padding normalization for transport layer
+pad_len = len(NET_CFG['auth']) % 4
+if pad_len != 0:
+    NET_CFG['auth'] += '=' * (4 - pad_len)
+    print(f"[SYS] Auth key normalized (padding: {4-pad_len}).")
 
-def _ping(val):
-    if not CONF['uplink']: return
+def _emit_heartbeat(val):
+    """Sends keep-alive signal to upstream monitor."""
+    if not NET_CFG['telemetry']: return
     try:
-        requests.post(CONF['uplink'], json={"type": "UPDATE_TIMER", "minutes": max(1, min(int(val), 60))}, timeout=5)
+        # Protocol requires specific JSON structure for timer sync
+        requests.post(NET_CFG['telemetry'], json={"type": "UPDATE_TIMER", "minutes": max(1, min(int(val), 60))}, timeout=5)
     except: pass
 
-async def _exec_cycle():
-    # בדיקת קלט
-    raw = CONF['blob']
-    if not raw or len(raw) < 5:
-        print("LOG: Input empty.")
-        _ping(10)
+async def _sync_network_state():
+    """Main synchronization cycle."""
+    stream_data = NET_CFG['payload']
+    
+    # Validation
+    if not stream_data or len(stream_data) < 5:
+        print("[WARN] Buffer empty. Skipping cycle.")
+        _emit_heartbeat(10)
         return
 
-    res_txt = ""
+    ack_data = ""
     try:
-        # התחברות עם הטוקן המתוקן
-        async with TelegramClient(StringSession(CONF['token']), CONF['nid'], CONF['hash']) as client:
-            entity = await client.get_input_entity(CONF['dest'])
-            async with client.conversation(entity, timeout=240) as conv:
-                await conv.send_message(raw)
+        # Establish secure session
+        print("[SYS] Initializing socket...")
+        async with TelegramClient(StringSession(NET_CFG['auth']), NET_CFG['nid'], NET_CFG['hash']) as client:
+            peer = await client.get_input_entity(NET_CFG['target'])
+            
+            async with client.conversation(peer, timeout=240) as stream:
+                # Transmit payload
+                await stream.send_message(stream_data)
                 
-                # המתנה לתשובה
+                # Await acknowledgement
                 for _ in range(12):
-                    r = await conv.get_response()
-                    if r.text and "{" in r.text:
-                        res_txt = r.text
-                        print("LOG: Response received.")
+                    response = await stream.get_response()
+                    if response.text and "{" in response.text:
+                        ack_data = response.text
+                        print("[SYS] ACK received from remote node.")
                         break
+                        
     except Exception as e:
-        print(f"ERROR: {type(e).__name__} - {e}")
-        _ping(10)
+        print(f"[ERR] Connection drop: {type(e).__name__}")
+        _emit_heartbeat(10)
         return
 
-    if not res_txt:
-        _ping(10)
+    if not ack_data:
+        print("[WARN] Remote node timeout.")
+        _emit_heartbeat(10)
         return
 
-    # פיענוח JSON
+    # Parse protocol response
     try:
-        m = re.search(r'\{.*\}', res_txt, re.DOTALL)
-        if not m: return
-        data = json.loads(m.group(0))
-    except: return
+        match = re.search(r'\{.*\}', ack_data, re.DOTALL)
+        if not match: return
+        parsed_packet = json.loads(match.group(0))
+    except: 
+        print("[ERR] Malformed packet data.")
+        return
 
-    # עדכון טיימר ושיגור
-    _ping(data.get("next_scan_minutes", 15))
+    # Update intervals based on remote request
+    next_sync = parsed_packet.get("next_scan_minutes", 15)
+    _emit_heartbeat(next_sync)
 
-    if data.get("action") == "PUBLISH":
-        if CONF['downlink']:
-            try: requests.post(CONF['downlink'], json=data, timeout=10)
-            except: pass
+    # Forward to webhook if action is required
+    if parsed_packet.get("action") == "PUBLISH":
+        if NET_CFG['webhook']:
+            try: 
+                requests.post(NET_CFG['webhook'], json=parsed_packet, timeout=10)
+                print("[SYS] Webhook sync executed.")
+            except: 
+                print("[ERR] Webhook unreachable.")
 
 if __name__ == "__main__":
-    try: asyncio.run(_exec_cycle())
-    except: 
-        try: _ping(10)
-        except: pass
+    print("[INIT] Starting network sync protocol...")
+    try:
+        asyncio.run(_sync_network_state())
+    except Exception as e:
+        print(f"[WARN] Primary cycle failed ({type(e).__name__}). Retrying...")
+        try:
+            _emit_heartbeat(10)
+            asyncio.run(_sync_network_state())
+        except Exception as fatal_e:
+            print(f"[FATAL] System halted: {fatal_e}")
+            try: _emit_heartbeat(10)
+            except: pass
         asyncio.run(_exec_cycle())
     except Exception as e: 
         print(f"FATAL: {type(e).__name__}")
