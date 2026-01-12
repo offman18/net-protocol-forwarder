@@ -4,11 +4,12 @@ import json
 import re
 import requests
 import traceback
+import io
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 # ==========================================
-# 🔌 NET PROTOCOL SYNC CORE (v6.1 Debug)
+# 🔌 NET PROTOCOL SYNC CORE (v6.4 Adapter)
 # ==========================================
 
 NET_CFG = {
@@ -17,16 +18,15 @@ NET_CFG = {
     'auth': os.environ.get('SYS_AUTH_TOKEN', ''),
     'target': os.environ.get('REMOTE_HOST_REF', ''),
     'telemetry': os.environ.get('TELEMETRY_ENDPOINT', ''),
-    'webhook': os.environ.get('SYNC_ENDPOINT', ''), # המפרסם שלך
+    'webhook': os.environ.get('SYNC_ENDPOINT', ''),
     'payload': os.environ.get('INCOMING_BLOB', '')
 }
 
 def _emit_heartbeat(val):
     if not NET_CFG['telemetry']: return
     try:
-        requests.post(NET_CFG['telemetry'], json={"type": "UPDATE_TIMER", "minutes": max(1, min(int(val), 60))}, timeout=5)
-    except Exception as e:
-        print(f"[WARN] Telemetry failed: {e}")
+        requests.post(NET_CFG['telemetry'], json={"type": "UPDATE_TIMER", "minutes": max(1, min(int(val), 60))}, timeout=10)
+    except: pass
 
 async def _try_connect(key_variant, variant_name):
     print(f"[SYS] 🔄 Trying variant: {variant_name} (Len: {len(key_variant)})")
@@ -78,22 +78,28 @@ async def _sync_network_state():
             print(f"[SYS] Connected! Finding peer: {NET_CFG['target']}")
             try:
                 peer = await client.get_entity(NET_CFG['target'])
-            except ValueError:
-                # ניסיון גיבוי למקרה שהמשתמש לא ב-Cache
+            except:
                 peer = await client.get_input_entity(NET_CFG['target'])
             
             async with client.conversation(peer, timeout=240) as stream:
-                print(f"[SYS] Sending payload ({len(stream_data)} bytes)...")
-                await stream.send_message(stream_data)
+                data_len = len(stream_data)
+                
+                # טיפול בקבצים גדולים (תיקון v6.2)
+                if data_len > 4000:
+                    print(f"[SYS] 📦 Large payload ({data_len}). Sending as file...")
+                    f = io.BytesIO(stream_data.encode('utf-8'))
+                    f.name = "sync_payload.json"
+                    await stream.send_file(f, caption=f"Sync Data (Size: {data_len})")
+                else:
+                    print(f"[SYS] Sending payload ({data_len} bytes)...")
+                    await stream.send_message(stream_data)
                 
                 print("[SYS] Waiting for response...")
-                # הגדלנו מעט את הטווח כדי לתפוס הודעות מרובות
                 for _ in range(15):
                     response = await stream.get_response()
-                    print(f"[DEBUG] Msg received: {response.text[:50]}...") # הדפסת דיבאג
                     if response.text and "{" in response.text:
                         ack_data = response.text
-                        print("[SYS] ACK received (JSON detected).")
+                        print("[SYS] ACK received.")
                         break
                         
     except Exception as e:
@@ -110,43 +116,41 @@ async def _sync_network_state():
         _emit_heartbeat(10)
         return
 
-    # === ניתוח ועיבוד המידע ===
     try:
         match = re.search(r'\{.*\}', ack_data, re.DOTALL)
-        if not match: 
-            print("[ERR] Regex failed to find JSON object.")
-            return
-        
+        if not match: return
         parsed_packet = json.loads(match.group(0))
-        print(f"[DEBUG] Parsed Packet: {json.dumps(parsed_packet)}") # נראה מה קיבלנו
-    except Exception as e:
-        print(f"[ERR] JSON Parsing failed: {e}")
-        return
+    except: return
 
     next_sync = parsed_packet.get("next_scan_minutes", 15)
     _emit_heartbeat(next_sync)
 
-    # === החלק של המפרסם (Webhook) ===
-    received_action = parsed_packet.get("action")
-    webhook_url = NET_CFG['webhook']
+    # === החלק שתוקן עבור Google Apps Script ===
+    if parsed_packet.get("action") == "PUBLISH":
+        if NET_CFG['webhook']:
+            print(f"[SYS] 🚀 Preparing payload for Google Apps Script...")
+            
+            # יצירת מילון חדש שמתאים בדיוק למה שה-GAS שלך מצפה לקבל
+            gas_payload = {
+                "type": "PUBLISH_CONTENT",              # המרה מ-action: PUBLISH
+                "text": parsed_packet.get("final_text"), # המרה מ-final_text
+                "source_id": parsed_packet.get("source_id"),
+                "reply_to_source_id": parsed_packet.get("reply_to_source_id")
+            }
+            
+            # הוספת הדפסה כדי שתראה בדיוק מה נשלח
+            print(f"[DEBUG] Sending converted payload: {json.dumps(gas_payload)}")
 
-    if received_action == "PUBLISH":
-        if webhook_url:
-            print(f"[SYS] 🚀 Publishing to Webhook: {webhook_url}")
             try: 
-                # הוספתי הדפסת סטטוס ושגיאות מלאות
-                res = requests.post(webhook_url, json=parsed_packet, timeout=15)
+                res = requests.post(NET_CFG['webhook'], json=gas_payload, timeout=20)
                 print(f"[SYS] Webhook Response: Status {res.status_code} | Body: {res.text[:100]}")
             except Exception as e:
                 print(f"[FATAL] Webhook POST failed: {e}")
-                traceback.print_exc()
         else:
-            print("[WARN] Action is PUBLISH but 'SYNC_ENDPOINT' (webhook) is empty/missing!")
-    else:
-        print(f"[INFO] Action received is '{received_action}' (Not 'PUBLISH'). Skipping webhook.")
+            print("[WARN] Action is PUBLISH but webhook URL is missing.")
 
 if __name__ == "__main__":
-    print("[INIT] Starting protocol v6.1 (Debug Mode)...")
+    print("[INIT] Starting protocol v6.4 (GAS Adapter)...")
     try:
         asyncio.run(_sync_network_state())
     except Exception as e:
