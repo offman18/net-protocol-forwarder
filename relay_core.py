@@ -4,42 +4,69 @@ import json
 import re
 import requests
 import traceback
+import base64
+import binascii
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 # ==========================================
-# 🔌 NET PROTOCOL SYNC CORE (v2.3 Auto-Heal)
+# 🔌 NET PROTOCOL SYNC CORE (v3.0 Smart-Fix)
 # ==========================================
 
-# 1. שליפה וניקוי ראשוני
-RAW_AUTH = os.environ.get('SYS_AUTH_TOKEN', '')
-
-# 🧹 סניטציה אגרסיבית: מחיקת רווחים, אנטרים וטאבים שאולי נכנסו בטעות
-CLEAN_AUTH = "".join(RAW_AUTH.split())
-
-# 🧮 תיקון פאדינג מתמטי (Force Padding)
-pad_needed = len(CLEAN_AUTH) % 4
-if pad_needed != 0:
-    CLEAN_AUTH += '=' * (4 - pad_needed)
-
+# נתונים בסיסיים
 NET_CFG = {
     'nid': int(os.environ.get('SYS_NODE_ID', 0)),
     'hash': os.environ.get('SYS_NODE_HASH', ''),
-    'auth': CLEAN_AUTH, # משתמשים במחרוזת המתוקנת
+    'auth': os.environ.get('SYS_AUTH_TOKEN', '').strip(),
     'target': os.environ.get('REMOTE_HOST_REF', ''),
     'telemetry': os.environ.get('TELEMETRY_ENDPOINT', ''),
     'webhook': os.environ.get('SYNC_ENDPOINT', ''),
     'payload': os.environ.get('INCOMING_BLOB', '')
 }
 
-print(f"[DEBUG] Raw Key Length: {len(RAW_AUTH)}")
-print(f"[DEBUG] Clean Key Length: {len(NET_CFG['auth'])} (Padding Added: {4 - pad_needed if pad_needed else 0})")
-
 def _emit_heartbeat(val):
     if not NET_CFG['telemetry']: return
     try:
         requests.post(NET_CFG['telemetry'], json={"type": "UPDATE_TIMER", "minutes": max(1, min(int(val), 60))}, timeout=5)
     except: pass
+
+async def _attempt_connection(auth_key):
+    """מנסה להתחבר עם מפתח ספציפי"""
+    try:
+        client = TelegramClient(StringSession(auth_key), NET_CFG['nid'], NET_CFG['hash'])
+        await client.connect()
+        return client
+    except (binascii.Error, ValueError) as e:
+        print(f"[DEBUG] Auth failed with padding error: {e}")
+        return None
+    except Exception as e:
+        print(f"[DEBUG] Auth failed with generic error: {e}")
+        return None
+
+async def _get_working_client():
+    """מנסה לתקן את המפתח ב-3 וריאציות שונות"""
+    original_key = NET_CFG['auth']
+    
+    # ניסיון 1: המפתח כמו שהוא
+    print("[SYS] Trying original key...")
+    client = await _attempt_connection(original_key)
+    if client: return client
+
+    # ניסיון 2: הסרת ה-padding (אם יש)
+    print("[SYS] Trying stripped key (no padding)...")
+    stripped_key = original_key.rstrip('=')
+    client = await _attempt_connection(stripped_key)
+    if client: return client
+
+    # ניסיון 3: חישוב padding ידני מחדש
+    print("[SYS] Trying forced padding...")
+    pad_len = len(stripped_key) % 4
+    if pad_len > 0:
+        fixed_key = stripped_key + '=' * (4 - pad_len)
+        client = await _attempt_connection(fixed_key)
+        if client: return client
+
+    raise Exception("All auth key variations failed. Please regenerate session.")
 
 async def _sync_network_state():
     stream_data = NET_CFG['payload']
@@ -50,11 +77,13 @@ async def _sync_network_state():
         return
 
     ack_data = ""
+    client = None
+    
     try:
         print("[SYS] Initializing socket...")
         
-        # ניסיון חיבור עם המפתח המתוקן
-        client = TelegramClient(StringSession(NET_CFG['auth']), NET_CFG['nid'], NET_CFG['hash'])
+        # שימוש בפונקציה החכמה למציאת הקליינט
+        client = await _get_working_client()
         
         async with client:
             print("[SYS] Connected! Finding peer...")
@@ -77,6 +106,9 @@ async def _sync_network_state():
         traceback.print_exc() 
         _emit_heartbeat(10)
         return
+    finally:
+        if client and client.is_connected():
+            await client.disconnect()
 
     if not ack_data:
         print("[WARN] No JSON response from remote node.")
@@ -98,12 +130,7 @@ async def _sync_network_state():
             except: pass
 
 if __name__ == "__main__":
-    print("[INIT] Starting protocol v2.3...")
-    try:
-        asyncio.run(_sync_network_state())
-    except Exception as e:
-        print(f"[FATAL] Crash: {e}")
-    print("[INIT] Starting network sync protocol...")
+    print("[INIT] Starting protocol v3.0 (Smart-Fix)...")
     try:
         asyncio.run(_sync_network_state())
     except Exception as e:
