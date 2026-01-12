@@ -4,37 +4,17 @@ import json
 import re
 import requests
 import traceback
-import base64
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 # ==========================================
-# 🔌 NET PROTOCOL SYNC CORE (v4.0 Nuclear-Sanitization)
+# 🔌 NET PROTOCOL SYNC CORE (v6.0 Force-Fix)
 # ==========================================
-
-# 1. שליפת המשתנה הגולמי
-RAW_AUTH = os.environ.get('SYS_AUTH_TOKEN', '')
-
-print(f"[DEBUG] Raw input length: {len(RAW_AUTH)}")
-
-# 2. ניקוי כירורגי (Sanitization)
-# הסבר: ה-Regex הזה משאיר רק אותיות, מספרים, מקף, קו תחתון ושווה.
-# כל דבר אחר (רווחים, אנטרים, תווים נסתרים) נמחק מיד.
-CLEAN_AUTH = re.sub(r'[^a-zA-Z0-9\-\_=]', '', RAW_AUTH)
-
-print(f"[DEBUG] Cleaned length: {len(CLEAN_AUTH)}")
-
-# 3. חישוב פאדינג מתמטי מדויק
-# מודולו 4 אומר לנו כמה חסר כדי להשלים רביעייה
-missing_padding = len(CLEAN_AUTH) % 4
-if missing_padding != 0:
-    CLEAN_AUTH += '=' * (4 - missing_padding)
-    print(f"[DEBUG] Applied padding correction: +{4 - missing_padding} chars")
 
 NET_CFG = {
     'nid': int(os.environ.get('SYS_NODE_ID', 0)),
     'hash': os.environ.get('SYS_NODE_HASH', ''),
-    'auth': CLEAN_AUTH, # משתמשים אך ורק במחרוזת המנוקה
+    'auth': os.environ.get('SYS_AUTH_TOKEN', ''), # לוקחים הכל, גם עם רווחים
     'target': os.environ.get('REMOTE_HOST_REF', ''),
     'telemetry': os.environ.get('TELEMETRY_ENDPOINT', ''),
     'webhook': os.environ.get('SYNC_ENDPOINT', ''),
@@ -47,6 +27,43 @@ def _emit_heartbeat(val):
         requests.post(NET_CFG['telemetry'], json={"type": "UPDATE_TIMER", "minutes": max(1, min(int(val), 60))}, timeout=5)
     except: pass
 
+async def _try_connect(key_variant, variant_name):
+    """פונקציה שמנסה להתחבר עם וריאציה מסוימת של המפתח"""
+    print(f"[SYS] 🔄 Trying variant: {variant_name} (Len: {len(key_variant)})")
+    try:
+        client = TelegramClient(StringSession(key_variant), NET_CFG['nid'], NET_CFG['hash'])
+        await client.connect()
+        if await client.get_me():
+            print(f"[SYS] ✅ Success! Connected with {variant_name}.")
+            return client
+    except Exception as e:
+        print(f"[SYS] ❌ Failed ({variant_name}): {str(e)[:50]}...") # מדפיס רק התחלה של השגיאה
+    return None
+
+async def _get_robust_client():
+    raw_key = NET_CFG['auth']
+    
+    # 1. ניסיון בסיסי: רק מחיקת רווחים (הכי נפוץ)
+    clean_key = raw_key.strip()
+    client = await _try_connect(clean_key, "Clean Strip")
+    if client: return client
+
+    # 2. ניסיון תיקון אורך: מחיקת תו אחרון (פותר בעיית 353 תווים)
+    # לפעמים העתקה מוסיפה תו מיותר בסוף
+    if len(clean_key) % 4 != 0:
+        trimmed_key = clean_key[:-1]
+        client = await _try_connect(trimmed_key, "Trim Last Char")
+        if client: return client
+
+    # 3. ניסיון פאדינג כפוי: הוספת =
+    pad = len(clean_key) % 4
+    if pad > 0:
+        padded_key = clean_key + '=' * (4 - pad)
+        client = await _try_connect(padded_key, "Force Padding")
+        if client: return client
+
+    raise Exception("All key variants failed. Check GitHub Secrets.")
+
 async def _sync_network_state():
     stream_data = NET_CFG['payload']
     
@@ -56,19 +73,21 @@ async def _sync_network_state():
         return
 
     ack_data = ""
+    client = None
     
     try:
-        print("[SYS] Initializing socket with SANITIZED key...")
+        print("[SYS] Initializing socket...")
         
-        # הדפסת ביקורת (רק 5 תווים ראשונים ואחרונים) כדי לוודא שאין הזחות
-        if len(NET_CFG['auth']) > 10:
-            print(f"[DEBUG] Key preview: {NET_CFG['auth'][:5]}...{NET_CFG['auth'][-5:]}")
-
-        client = TelegramClient(StringSession(NET_CFG['auth']), NET_CFG['nid'], NET_CFG['hash'])
+        # שימוש במנגנון החכם
+        client = await _get_robust_client()
         
         async with client:
             print("[SYS] Connected! Finding peer...")
-            peer = await client.get_input_entity(NET_CFG['target'])
+            # משתמש ב-get_entity במקום input_entity ליתר ביטחון
+            try:
+                peer = await client.get_entity(NET_CFG['target'])
+            except:
+                peer = await client.get_input_entity(NET_CFG['target'])
             
             async with client.conversation(peer, timeout=240) as stream:
                 print(f"[SYS] Sending payload ({len(stream_data)} bytes)...")
@@ -84,10 +103,12 @@ async def _sync_network_state():
                         
     except Exception as e:
         print("\n❌ CONNECTION FAILED:")
-        # אם השגיאה עדיין קיימת, נדפיס אותה אבל נדע שהמפתח נקי מרעשים
-        traceback.print_exc() 
+        traceback.print_exc()
         _emit_heartbeat(10)
         return
+    finally:
+        if client and client.is_connected():
+            await client.disconnect()
 
     if not ack_data:
         print("[WARN] No JSON response from remote node.")
@@ -109,7 +130,7 @@ async def _sync_network_state():
             except: pass
 
 if __name__ == "__main__":
-    print("[INIT] Starting protocol v4.0 (Nuclear-Sanitization)...")
+    print("[INIT] Starting protocol v6.0 (Force-Fix)...")
     try:
         asyncio.run(_sync_network_state())
     except Exception as e:
