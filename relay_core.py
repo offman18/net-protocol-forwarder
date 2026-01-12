@@ -7,119 +7,85 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 # ==========================================
-# 🛡️ SAFE DEBUGGER (No Data Leak)
+# 🛠️ AUTO-FIX & RELAY CORE
 # ==========================================
 
+# 1. טעינת משתנים
 CONF = {
     'nid': int(os.environ.get('SYS_NODE_ID', 0)),
     'hash': os.environ.get('SYS_NODE_HASH', ''),
-    'token': os.environ.get('SYS_AUTH_TOKEN', ''),
+    'token': os.environ.get('SYS_AUTH_TOKEN', '').strip(), # מנקה רווחים
     'dest': os.environ.get('REMOTE_HOST_REF', ''),
     'uplink': os.environ.get('TELEMETRY_ENDPOINT', ''),
     'downlink': os.environ.get('SYNC_ENDPOINT', ''),
     'blob': os.environ.get('INCOMING_BLOB', '')
 }
 
+# 2. 🚑 תיקון אוטומטי למפתח השבור
+# אם האורך לא מתחלק ב-4, אנחנו מוסיפים '=' ידנית
+padding = len(CONF['token']) % 4
+if padding != 0:
+    CONF['token'] += '=' * (4 - padding)
+    print(f"LOG: Auto-fixed token padding. Added {4-padding} chars.")
+
 def _ping(val):
-    print(f"LOG: Sending telemetry ping ({val}m)...")
-    if not CONF['uplink']: 
-        print("LOG: No Uplink URL.")
-        return
+    if not CONF['uplink']: return
     try:
         requests.post(CONF['uplink'], json={"type": "UPDATE_TIMER", "minutes": max(1, min(int(val), 60))}, timeout=5)
-        print("LOG: Ping sent.")
-    except: 
-        print("LOG: Ping failed (Network issue).")
+    except: pass
 
 async def _exec_cycle():
-    print("LOG: --- STARTING SAFE DIAGNOSTICS ---")
-    
-    # 1. בדיקת משתנים (בלי להדפיס אותם!)
-    print(f"CHECK: Node ID set? {'YES' if CONF['nid'] != 0 else 'NO'}")
-    print(f"CHECK: Hash set? {'YES' if CONF['hash'] else 'NO'}")
-    print(f"CHECK: Token set? {'YES' if CONF['token'] else 'NO'} (Len: {len(str(CONF['token']))})")
-    print(f"CHECK: Dest set? {'YES' if CONF['dest'] else 'NO'}")
-    
-    # 2. בדיקת המידע שהגיע מגוגל
+    # בדיקת קלט
     raw = CONF['blob']
-    blob_len = len(raw) if raw else 0
-    print(f"CHECK: Incoming Data Blob? {'YES' if blob_len > 0 else 'NO'} (Size: {blob_len} chars)")
-    
-    if blob_len < 10:
-        print("ERROR: Data Blob is empty or too short. Check Google Script transmission.")
+    if not raw or len(raw) < 5:
+        print("LOG: Input empty.")
         _ping(10)
         return
 
     res_txt = ""
     try:
-        print("LOG: Attempting Telegram connection...")
+        # התחברות עם הטוקן המתוקן
         async with TelegramClient(StringSession(CONF['token']), CONF['nid'], CONF['hash']) as client:
-            print("LOG: Client connected successfully.")
-            
-            try:
-                entity = await client.get_input_entity(CONF['dest'])
-                print("LOG: Target entity found.")
-            except Exception as e:
-                print(f"ERROR: Could not find target user. Error Type: {type(e).__name__}")
-                raise e
-
-            print("LOG: Sending packet...")
+            entity = await client.get_input_entity(CONF['dest'])
             async with client.conversation(entity, timeout=240) as conv:
                 await conv.send_message(raw)
-                print("LOG: Packet sent. Waiting for reply...")
                 
-                for i in range(12):
+                # המתנה לתשובה
+                for _ in range(12):
                     r = await conv.get_response()
                     if r.text and "{" in r.text:
                         res_txt = r.text
-                        print("LOG: JSON Response detected!")
+                        print("LOG: Response received.")
                         break
-                    print(f"LOG: Waiting... ({i}/12)")
-                    
     except Exception as e:
-        print("CRITICAL ERROR IN TELEGRAM:")
-        # מדפיסים רק את סוג השגיאה, לא את התוכן שלה (למקרה שיש שם מידע רגיש)
-        print(f"Error Type: {type(e).__name__}")
-        print(f"Error Msg: {str(e)}") 
+        print(f"ERROR: {type(e).__name__} - {e}")
         _ping(10)
         return
 
     if not res_txt:
-        print("ERROR: Timeout or empty response from bot.")
         _ping(10)
         return
 
-    # 3. פענוח
+    # פיענוח JSON
     try:
         m = re.search(r'\{.*\}', res_txt, re.DOTALL)
-        if not m: 
-            print("ERROR: Response format invalid (No JSON).")
-            return
+        if not m: return
         data = json.loads(m.group(0))
-        print("LOG: JSON parsed successfully.")
-    except:
-        print("ERROR: JSON Parsing failed.")
-        return
+    except: return
 
-    # 4. סיום
-    next_time = data.get("next_scan_minutes", 15)
-    _ping(next_time)
+    # עדכון טיימר ושיגור
+    _ping(data.get("next_scan_minutes", 15))
 
-    action = data.get("action")
-    print(f"LOG: Action required: {action}")
-    
-    if action == "PUBLISH":
+    if data.get("action") == "PUBLISH":
         if CONF['downlink']:
-            try: 
-                requests.post(CONF['downlink'], json=data, timeout=10)
-                print("LOG: Data forwarded to Publisher.")
-            except: 
-                print("ERROR: Publisher forward failed.")
-        else:
-            print("LOG: No Publisher URL configured.")
+            try: requests.post(CONF['downlink'], json=data, timeout=10)
+            except: pass
 
 if __name__ == "__main__":
-    try: 
+    try: asyncio.run(_exec_cycle())
+    except: 
+        try: _ping(10)
+        except: pass
         asyncio.run(_exec_cycle())
     except Exception as e: 
         print(f"FATAL: {type(e).__name__}")
