@@ -10,7 +10,7 @@ from telethon.sessions import StringSession
 from telethon.errors import TimeoutError as TelethonTimeout
 
 # ==========================================
-# 🔌 PROTOCOL RELAY v7.2
+# 🔌 PROTOCOL RELAY v7.3 (Stable Sync)
 # ==========================================
 
 # הגדרות סביבה
@@ -24,8 +24,7 @@ SYS_CFG = {
     'payload': os.environ.get('INCOMING_BLOB', '')
 }
 
-# 🛡️ Obfuscated Strings (שבירת מחרוזות למניעת זיהוי בחיפוש)
-# זה קריא לך, אבל לא ניתן לחיפוש טקסטואלי פשוט
+# 🛡️ Obfuscated Strings
 CMD_RESET = "/" + "n" + "e" + "w"
 BTN_L1 = "".join(["Neu", "ral", " net", "work"])
 BTN_L2 = "Gem" + "ini"
@@ -51,10 +50,7 @@ def _update_telemetry(val, status="OK"):
 async def _connect_node():
     key = SYS_CFG['auth'].strip() if SYS_CFG['auth'] else ""
     if not key: raise Exception("Auth Missing")
-    
-    # ניסיונות חיבור עם ריפוד משתנה
     variants = [key, key[:-1] if len(key)%4 else None, key+'='*(4-len(key)%4) if len(key)%4 else None]
-    
     for v in variants:
         if v:
             try:
@@ -75,33 +71,48 @@ async def _execute_sequence(client, peer, payload):
         # --- PHASE 1: Initialization ---
         if mode == 'INIT':
             print("[SYS] Init sequence started")
+            
+            # 1. Send /new and WAIT for menu
             await conv.send_message(CMD_RESET)
-            await asyncio.sleep(3)
+            resp = await conv.get_response() # מחכים לתפריט הראשי
+            await asyncio.sleep(1) 
             
-            # Click L1
-            m = await client.get_messages(peer, limit=1)
-            if m and m[0].buttons: await m[0].click(text=BTN_L1); await asyncio.sleep(3)
+            # 2. Click L1 (Neural network) and WAIT for next menu
+            if resp.buttons:
+                await resp.click(text=BTN_L1)
+                resp = await conv.get_response() # מחכים לתפריט המודלים
+                await asyncio.sleep(1)
             
-            # Click L2
-            m = await client.get_messages(peer, limit=1)
-            if m and m[0].buttons: await m[0].click(text=BTN_L2); await asyncio.sleep(3)
+            # 3. Click L2 (Gemini) and WAIT for next menu
+            if resp.buttons:
+                await resp.click(text=BTN_L2)
+                resp = await conv.get_response() # מחכים לתפריט גרסאות
+                await asyncio.sleep(1)
             
-            # Click L3 (Smart Search)
-            m = await client.get_messages(peer, limit=1)
-            if m and m[0].buttons:
+            # 4. Click L3 (Pro/Beta) and WAIT for confirmation
+            if resp.buttons:
                 found = False
-                for r in m[0].buttons:
+                for r in resp.buttons:
                     for b in r:
                         t = b.text.lower()
                         if BTN_L3_A in t and (BTN_L3_B in t or BTN_L3_C in t):
                             await b.click(); found = True; break
                     if found: break
-                await asyncio.sleep(3)
+                
+                # אם לחצנו, מחכים לאישור שהמודל נבחר
+                if found:
+                    await conv.get_response()
+                    await asyncio.sleep(1)
             
-            # Send System Prompt
+            # 5. Send System Prompt and WAIT for ACK
             if prompt:
+                print("[SYS] Sending prompt...")
                 await conv.send_message(prompt)
-                await asyncio.sleep(5)
+                # קריטי: מחכים שהבוט יגיד "קיבלתי" לפני שממשיכים
+                # זה מונע את ההתנגשות עם הדאטה שמגיע מיד אחרי
+                await conv.get_response()
+                print("[SYS] Prompt acknowledged. Waiting buffer...")
+                await asyncio.sleep(3) # מנוחה קצרה למניעת Flood
 
         # --- PHASE 2: Data Transfer ---
         print(f"[SYS] Transferring data (Mode: {mode})")
@@ -118,9 +129,9 @@ async def _execute_sequence(client, peer, payload):
             try:
                 resp = await conv.get_response()
                 raw = resp.text
-                # Clean markdown
+                
+                # Clean markdown and find JSON
                 clean = re.sub(r'```json\s*|\s*```', '', raw).strip()
-                # Find JSON block
                 match = re.search(r'\{.*\}', clean, re.DOTALL)
                 
                 if match:
@@ -129,10 +140,10 @@ async def _execute_sequence(client, peer, payload):
                 
                 raise ValueError("Invalid Structure")
             except:
-                print(f"[WARN] Retry {attempt+1}/3")
+                print(f"[WARN] Retry {attempt+1}/3 (Not JSON)")
                 if attempt < 2:
                     await conv.send_message(ERR_MSG)
-                    await asyncio.sleep(2)
+                    # מחכים לתשובה המתוקנת
         
         return None
 
@@ -176,4 +187,3 @@ async def _main():
 
 if __name__ == "__main__":
     asyncio.run(_main())
-
