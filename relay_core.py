@@ -10,7 +10,7 @@ from telethon.sessions import StringSession
 from telethon.errors import TimeoutError as TelethonTimeout
 
 # ==========================================
-# 🔌 PROTOCOL RELAY v7.3 (Stable Sync)
+# 🔌 PROTOCOL RELAY v7.4 (Smart Wait)
 # ==========================================
 
 # הגדרות סביבה
@@ -71,25 +71,20 @@ async def _execute_sequence(client, peer, payload):
         # --- PHASE 1: Initialization ---
         if mode == 'INIT':
             print("[SYS] Init sequence started")
-            
-            # 1. Send /new and WAIT for menu
             await conv.send_message(CMD_RESET)
-            resp = await conv.get_response() # מחכים לתפריט הראשי
+            resp = await conv.get_response()
             await asyncio.sleep(1) 
             
-            # 2. Click L1 (Neural network) and WAIT for next menu
             if resp.buttons:
                 await resp.click(text=BTN_L1)
-                resp = await conv.get_response() # מחכים לתפריט המודלים
+                resp = await conv.get_response()
                 await asyncio.sleep(1)
             
-            # 3. Click L2 (Gemini) and WAIT for next menu
             if resp.buttons:
                 await resp.click(text=BTN_L2)
-                resp = await conv.get_response() # מחכים לתפריט גרסאות
+                resp = await conv.get_response()
                 await asyncio.sleep(1)
             
-            # 4. Click L3 (Pro/Beta) and WAIT for confirmation
             if resp.buttons:
                 found = False
                 for r in resp.buttons:
@@ -98,21 +93,16 @@ async def _execute_sequence(client, peer, payload):
                         if BTN_L3_A in t and (BTN_L3_B in t or BTN_L3_C in t):
                             await b.click(); found = True; break
                     if found: break
-                
-                # אם לחצנו, מחכים לאישור שהמודל נבחר
                 if found:
                     await conv.get_response()
                     await asyncio.sleep(1)
             
-            # 5. Send System Prompt and WAIT for ACK
             if prompt:
                 print("[SYS] Sending prompt...")
                 await conv.send_message(prompt)
-                # קריטי: מחכים שהבוט יגיד "קיבלתי" לפני שממשיכים
-                # זה מונע את ההתנגשות עם הדאטה שמגיע מיד אחרי
                 await conv.get_response()
                 print("[SYS] Prompt acknowledged. Waiting buffer...")
-                await asyncio.sleep(3) # מנוחה קצרה למניעת Flood
+                await asyncio.sleep(3)
 
         # --- PHASE 2: Data Transfer ---
         print(f"[SYS] Transferring data (Mode: {mode})")
@@ -124,27 +114,54 @@ async def _execute_sequence(client, peer, payload):
         else:
              await conv.send_message(msg)
         
-        # --- PHASE 3: Response & Healing ---
-        for attempt in range(3):
+        # --- PHASE 3: Response & Healing (With Patience) ---
+        print("[SYS] Waiting for JSON response...")
+        
+        # לולאה ראשית: מחכים עד 3 דקות לתשובה תקינה
+        # במקום "נסיונות" (Attempts), אנחנו מודדים "זמן המתנה"
+        start_wait = asyncio.get_event_loop().time()
+        timeout = 180 # 3 דקות סך הכל
+        
+        last_msg_id = None
+        
+        while (asyncio.get_event_loop().time() - start_wait) < timeout:
             try:
-                resp = await conv.get_response()
-                raw = resp.text
+                # מחכים להודעה חדשה
+                resp = await conv.get_response(timeout=20)
                 
-                # Clean markdown and find JSON
+                # מונעים כפילויות (אם קראנו אותה הודעה פעמיים)
+                if resp.id == last_msg_id: continue
+                last_msg_id = resp.id
+                
+                raw = resp.text or ""
+                
+                # דילוג על הודעות "Thinking" או ריקות
+                if not raw or len(raw) < 5 or "thinking" in raw.lower():
+                    print("[SYS] Skipping intermediate status...")
+                    continue
+
+                # בדיקת JSON
                 clean = re.sub(r'```json\s*|\s*```', '', raw).strip()
                 match = re.search(r'\{.*\}', clean, re.DOTALL)
                 
                 if match:
                     obj = json.loads(match.group(0))
-                    if "action" in obj: return obj # Success
+                    if "action" in obj: return obj # Success!
                 
-                raise ValueError("Invalid Structure")
-            except:
-                print(f"[WARN] Retry {attempt+1}/3 (Not JSON)")
-                if attempt < 2:
+                # אם הגענו לכאן, זו הודעה עם טקסט אבל בלי JSON
+                # רק במקרה כזה אנחנו שולחים בקשת תיקון, אבל גם זה בזהירות
+                if len(raw) > 50: # רק אם ההודעה מספיק ארוכה כדי להיות תשובה שגויה
+                    print("[WARN] Received text but not JSON. Sending correction request...")
                     await conv.send_message(ERR_MSG)
-                    # מחכים לתשובה המתוקנת
-        
+                    await asyncio.sleep(5) # נותנים לו זמן להירגע
+                    
+            except TelethonTimeout:
+                # ה-Timeout הקטן (20 שניות) עבר, ממשיכים לנסות בלולאה הגדולה
+                continue
+            except Exception as e:
+                print(f"[WARN] Parsing error: {e}")
+                await asyncio.sleep(2)
+
         return None
 
 async def _main():
@@ -176,6 +193,7 @@ async def _main():
                         "reply_to_source_id": result.get("reply_to_source_id")
                     }, timeout=20)
             else:
+                print("[SYS] Failed to get valid JSON within timeout")
                 _update_telemetry(10, "FAIL")
 
     except Exception as e:
