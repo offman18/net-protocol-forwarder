@@ -10,7 +10,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 # ==========================================
-# 🔌 PROTOCOL RELAY v8.2 (Exact Match)
+# 🔌 PROTOCOL RELAY v8.3 (Full Sync Wait)
 # ==========================================
 
 SYS_CFG = {
@@ -23,18 +23,10 @@ SYS_CFG = {
     'payload': os.environ.get('INCOMING_BLOB', '')
 }
 
-# 🛡️ Strings
 CMD_RESET = "/" + "n" + "e" + "w"
 BTN_L1 = "".join(["Neu", "ral", " net", "work"])
 BTN_L2 = "Gem" + "ini"
-# תיקון: חיפוש מדויק יותר של גרסה 3
-BTN_L3_TARGET = "gemini 3" 
-BTN_L4_CREATE = "Create"
-
-ERR_MSG = "".join([
-    "SYS", "TEM ER", "ROR: Invalid JSON format. ",
-    "Reply ONLY with JSON object."
-])
+ERR_MSG = "SYSTEM ERROR: Reply ONLY with JSON object."
 
 def _update_telemetry(val, status="OK"):
     if not SYS_CFG['telemetry']: return
@@ -78,27 +70,18 @@ async def _wait_for_new_message(client, peer, last_msg_id, timeout=180):
 
 async def _find_and_click(client, peer, text_match_func, retries=3):
     print(f"[SYS] Hunting for button...")
-    
     for attempt in range(retries):
         messages = await client.get_messages(peer, limit=5)
-        
         for msg in messages:
             if not msg.buttons: continue
-            
             for row in msg.buttons:
                 for btn in row:
                     clean_text = btn.text.replace('\ufe0f', '').strip()
-                    # הדפסת דיבאג כדי לראות על מה הוא מדלג
-                    # print(f"Checking: {clean_text}") 
-                    
                     if text_match_func(clean_text):
                         print(f"[SYS] 👉 Clicked: '{clean_text}' (MsgID: {msg.id})")
                         await btn.click()
                         return True
-        
-        print(f"[WARN] Button not found (Attempt {attempt+1}/{retries}). Waiting...")
         await asyncio.sleep(3)
-        
     print("[ERR] Button hunt failed.")
     return False
 
@@ -108,6 +91,7 @@ async def _execute_sequence(client, peer, payload):
     content = payload.get('content')
     ctx_time = payload.get('time_context', '')
     
+    # שליפת ID התחלתי
     last_msgs = await client.get_messages(peer, limit=1)
     last_id = last_msgs[0].id if last_msgs else 0
 
@@ -118,7 +102,8 @@ async def _execute_sequence(client, peer, payload):
         print("[SYS] Init sequence started")
         
         # 1. Send /new
-        await client.send_message(peer, CMD_RESET)
+        sent = await client.send_message(peer, CMD_RESET)
+        last_id = sent.id # עדכון כדי שלא נתבלבל
         await asyncio.sleep(4)
         
         # 2. Click Neural Network
@@ -129,22 +114,31 @@ async def _execute_sequence(client, peer, payload):
         await _find_and_click(client, peer, lambda t: BTN_L2.lower() in t.lower())
         await asyncio.sleep(4)
         
-        # 4. Click Gemini 3 Pro (תיקון: חיפוש ספציפי של הספרה 3)
-        # אנחנו מחפשים כפתור שמכיל גם 'gemini' וגם '3'
+        # 4. Click Gemini 3 (חיפוש מדויק)
         await _find_and_click(client, peer, lambda t: 'gemini' in t.lower() and '3' in t.lower())
         await asyncio.sleep(4)
         
-        # 5. Click Create --> (תיקון: הוספת שלב סופי)
-        # מחפשים כפתור שמכיל 'create' או חץ '-->'
+        # 5. Click Create -->
         await _find_and_click(client, peer, lambda t: 'create' in t.lower() or '-->' in t)
         await asyncio.sleep(4)
         
-        # 6. Send Prompt
+        # 6. Send Prompt & WAIT FOR ACK
         if prompt:
             print("[SYS] Sending prompt...")
-            sent = await client.send_message(peer, prompt)
-            last_id = sent.id
-            await asyncio.sleep(6)
+            prompt_msg = await client.send_message(peer, prompt)
+            last_id = prompt_msg.id # מעדכנים ID
+            
+            print("[SYS] Waiting for Prompt ACK...")
+            # ⭐ ההמתנה הקריטית: מחכים שהבוט יגיד "הבנתי"
+            ack_msg = await _wait_for_new_message(client, peer, last_id, timeout=60)
+            
+            if ack_msg:
+                print("[SYS] Prompt acknowledged. Moving to Data Phase.")
+                last_id = ack_msg.id # מעדכנים ID שוב כדי לדלג על ה-ACK
+            else:
+                print("[WARN] No ACK for prompt, proceeding anyway...")
+            
+            await asyncio.sleep(2)
 
     # ==========================================
     # 🚀 PHASE 2: Data Transfer
