@@ -10,7 +10,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 # ==========================================
-# 🔌 PROTOCOL RELAY v8.1 (Fixed Indentation)
+# 🔌 PROTOCOL RELAY v8.2 (Exact Match)
 # ==========================================
 
 SYS_CFG = {
@@ -27,9 +27,9 @@ SYS_CFG = {
 CMD_RESET = "/" + "n" + "e" + "w"
 BTN_L1 = "".join(["Neu", "ral", " net", "work"])
 BTN_L2 = "Gem" + "ini"
-BTN_L3_A = "gem" + "ini"
-BTN_L3_B = "pr" + "o"
-BTN_L3_C = "be" + "ta"
+# תיקון: חיפוש מדויק יותר של גרסה 3
+BTN_L3_TARGET = "gemini 3" 
+BTN_L4_CREATE = "Create"
 
 ERR_MSG = "".join([
     "SYS", "TEM ER", "ROR: Invalid JSON format. ",
@@ -88,6 +88,8 @@ async def _find_and_click(client, peer, text_match_func, retries=3):
             for row in msg.buttons:
                 for btn in row:
                     clean_text = btn.text.replace('\ufe0f', '').strip()
+                    # הדפסת דיבאג כדי לראות על מה הוא מדלג
+                    # print(f"Checking: {clean_text}") 
                     
                     if text_match_func(clean_text):
                         print(f"[SYS] 👉 Clicked: '{clean_text}' (MsgID: {msg.id})")
@@ -127,11 +129,17 @@ async def _execute_sequence(client, peer, payload):
         await _find_and_click(client, peer, lambda t: BTN_L2.lower() in t.lower())
         await asyncio.sleep(4)
         
-        # 4. Click Pro/Beta
-        await _find_and_click(client, peer, lambda t: BTN_L3_A.lower() in t.lower() and (BTN_L3_B.lower() in t.lower() or BTN_L3_C.lower() in t.lower()))
+        # 4. Click Gemini 3 Pro (תיקון: חיפוש ספציפי של הספרה 3)
+        # אנחנו מחפשים כפתור שמכיל גם 'gemini' וגם '3'
+        await _find_and_click(client, peer, lambda t: 'gemini' in t.lower() and '3' in t.lower())
         await asyncio.sleep(4)
         
-        # 5. Send Prompt
+        # 5. Click Create --> (תיקון: הוספת שלב סופי)
+        # מחפשים כפתור שמכיל 'create' או חץ '-->'
+        await _find_and_click(client, peer, lambda t: 'create' in t.lower() or '-->' in t)
+        await asyncio.sleep(4)
+        
+        # 6. Send Prompt
         if prompt:
             print("[SYS] Sending prompt...")
             sent = await client.send_message(peer, prompt)
