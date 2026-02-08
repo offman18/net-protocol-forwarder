@@ -5,12 +5,12 @@ import re
 import requests
 import traceback
 import io
+import time
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telethon.errors import TimeoutError as TelethonTimeout
 
 # ==========================================
-# 🔌 PROTOCOL RELAY v7.5 (Direct Force)
+# 🔌 PROTOCOL RELAY v8.1 (Button Hunter)
 # ==========================================
 
 SYS_CFG = {
@@ -59,21 +59,51 @@ async def _connect_node():
             except: pass
     raise Exception("Connection Failed")
 
-async def _click_latest_button(client, peer, text_match_func):
-    """פונקציית עזר שלוחצת על הכפתור האחרון שמתאים לחיפוש"""
-    # שולפים את ההודעה האחרונה בצ'אט
-    messages = await client.get_messages(peer, limit=1)
-    if not messages: return False
+async def _wait_for_new_message(client, peer, last_msg_id, timeout=180):
+    start_time = time.time()
+    while (time.time() - start_time) < timeout:
+        await asyncio.sleep(5)
+        try:
+            msgs = await client.get_messages(peer, limit=1)
+            if not msgs: continue
+            
+            latest = msgs[0]
+            if latest.id > last_msg_id:
+                raw = latest.text or ""
+                # סינון רעשים
+                if len(raw) < 5 or "thinking" in raw.lower() or "typing" in raw.lower():
+                    continue 
+                return latest
+        except: pass
+    return None
+
+# ⭐ הפונקציה החדשה והחכמה ללחיצה
+async def _find_and_click(client, peer, text_match_func, retries=3):
+    print(f"[SYS] Hunting for button...")
     
-    msg = messages[0]
-    if not msg.buttons: return False
-    
-    # מחפשים את הכפתור
-    for row in msg.buttons:
-        for btn in row:
-            if text_match_func(btn.text):
-                await btn.click()
-                return True
+    for attempt in range(retries):
+        # שולפים את ה-5 הודעות האחרונות (לא רק אחת!)
+        # זה קריטי כי לפעמים ה-New הוא הודעה אחת והכפתורים בהודעה קודמת שנערכה
+        messages = await client.get_messages(peer, limit=5)
+        
+        for msg in messages:
+            if not msg.buttons: continue
+            
+            # סורקים את כל הכפתורים בכל השורות
+            for row in msg.buttons:
+                for btn in row:
+                    # מנקים רווחים וסימנים כדי לוודא התאמה
+                    clean_text = btn.text.replace('\ufe0f', '').strip()
+                    
+                    if text_match_func(clean_text):
+                        print(f"[SYS] 👉 Clicked: '{clean_text}' (MsgID: {msg.id})")
+                        await btn.click()
+                        return True
+        
+        print(f"[WARN] Button not found (Attempt {attempt+1}/{retries}). Waiting...")
+        await asyncio.sleep(3) # מחכים קצת שאולי ההודעה תתעדכן
+        
+    print("[ERR] Button hunt failed.")
     return False
 
 async def _execute_sequence(client, peer, payload):
@@ -82,91 +112,85 @@ async def _execute_sequence(client, peer, payload):
     content = payload.get('content')
     ctx_time = payload.get('time_context', '')
     
+    last_msgs = await client.get_messages(peer, limit=1)
+    last_id = last_msgs[0].id if last_msgs else 0
+
     # ==========================================
-    # 🌅 PHASE 1: Initialization (Direct Mode)
+    # 🌅 PHASE 1: Initialization
     # ==========================================
-    # אנחנו לא משתמשים ב-Conversation כאן כדי לא להיתקע
     if mode == 'INIT':
-        print("[SYS] Init sequence started (Direct Mode)")
+        print("[SYS] Init sequence started")
         
         # 1. Send /new
         await client.send_message(peer, CMD_RESET)
-        await asyncio.sleep(4) # מחכים לבוט שיירגע
+        await asyncio.sleep(4) # חובה לחכות שהבוט יגיב
         
-        # 2. Click Neural Network
-        print("[SYS] Looking for L1...")
-        await _click_latest_button(client, peer, lambda t: BTN_L1 in t)
+        # 2. Click Neural Network (מחפש ב-5 הודעות אחרונות)
+        await _find_and_click(client, peer, lambda t: BTN_L1.lower() in t.lower())
         await asyncio.sleep(4)
         
         # 3. Click Gemini
-        print("[SYS] Looking for L2...")
-        await _click_latest_button(client, peer, lambda t: BTN_L2 in t)
+        await _find_and_click(client, peer, lambda t: BTN_L2.lower() in t.lower())
         await asyncio.sleep(4)
         
         # 4. Click Pro/Beta
-        print("[SYS] Looking for L3...")
-        await _click_latest_button(client, peer, lambda t: BTN_L3_A in t.lower() and (BTN_L3_B in t.lower() or BTN_L3_C in t.lower()))
+        await _find_and_click(client, peer, lambda t: BTN_L3_A.lower() in t.lower() and (BTN_L3_B.lower() in t.lower() or BTN_L3_C.lower() in t.lower()))
         await asyncio.sleep(4)
         
         # 5. Send Prompt
         if prompt:
             print("[SYS] Sending prompt...")
-            await client.send_message(peer, prompt)
-            await asyncio.sleep(6) # מחכים לאישור (וזורקים אותו לפח)
+            sent = await client.send_message(peer, prompt)
+            last_id = sent.id
+            await asyncio.sleep(6)
 
     # ==========================================
-    # 🚀 PHASE 2 & 3: Data & Response (Conv Mode)
+    # 🚀 PHASE 2: Data Transfer
     # ==========================================
-    # כאן אנחנו כן פותחים האזנה כי צריך לתפוס את התשובה הספציפית
-    async with client.conversation(peer, timeout=300) as conv:
+    print(f"[SYS] Transferring data (Mode: {mode})")
+    msg_text = f"CURRENT_TIME: {ctx_time}\nDATA_STREAM: {content}"
+    
+    sent_msg = None
+    if len(msg_text) > 4000:
+         f = io.BytesIO(msg_text.encode('utf-8')); f.name = "blob.txt"
+         sent_msg = await client.send_file(peer, f)
+    else:
+         sent_msg = await client.send_message(peer, msg_text)
+    
+    if sent_msg: last_id = sent_msg.id
+
+    # ==========================================
+    # 🔧 PHASE 3: Polling Response
+    # ==========================================
+    print("[SYS] Polling for JSON response...")
+    
+    for attempt in range(3):
+        response_msg = await _wait_for_new_message(client, peer, last_id, timeout=180)
         
-        print(f"[SYS] Transferring data (Mode: {mode})")
-        msg = f"CURRENT_TIME: {ctx_time}\nDATA_STREAM: {content}"
+        if not response_msg:
+            print("[WARN] Timeout waiting for response")
+            return None
         
-        if len(msg) > 4000:
-             f = io.BytesIO(msg.encode('utf-8')); f.name = "blob.txt"
-             await conv.send_file(f)
-        else:
-             await conv.send_message(msg)
+        last_id = response_msg.id 
         
-        print("[SYS] Waiting for JSON response...")
+        raw = response_msg.text or ""
+        clean = re.sub(r'```json\s*|\s*```', '', raw).strip()
+        match = re.search(r'\{.*\}', clean, re.DOTALL)
         
-        # מנגנון המתנה חכם (עד 3 דקות)
-        start_wait = asyncio.get_event_loop().time()
-        timeout = 180
-        last_msg_id = None
-        
-        while (asyncio.get_event_loop().time() - start_wait) < timeout:
+        if match:
             try:
-                resp = await conv.get_response(timeout=20)
-                if resp.id == last_msg_id: continue
-                last_msg_id = resp.id
-                
-                raw = resp.text or ""
-                # דילוג על הודעות קצרות מדי או "חושב"
-                if len(raw) < 5 or "thinking" in raw.lower(): continue
+                obj = json.loads(match.group(0))
+                if "action" in obj: return obj
+            except: pass
+        
+        if len(raw) > 50:
+            print(f"[WARN] Invalid JSON (Attempt {attempt+1}/3). Requesting fix...")
+            sent_fix = await client.send_message(peer, ERR_MSG)
+            last_id = sent_fix.id
+        else:
+            pass 
 
-                # בדיקת JSON
-                clean = re.sub(r'```json\s*|\s*```', '', raw).strip()
-                match = re.search(r'\{.*\}', clean, re.DOTALL)
-                
-                if match:
-                    obj = json.loads(match.group(0))
-                    if "action" in obj: return obj
-                
-                # אם קיבלנו טקסט ארוך שאינו JSON - מבקשים תיקון
-                if len(raw) > 50:
-                    print("[WARN] Received text but not JSON. Sending correction...")
-                    await conv.send_message(ERR_MSG)
-                    await asyncio.sleep(5)
-                    
-            except TelethonTimeout:
-                continue # ממשיכים לנסות
-            except Exception as e:
-                print(f"[WARN] Error: {e}")
-                await asyncio.sleep(2)
-
-        return None
+    return None
 
 async def _main():
     blob = SYS_CFG['payload']
@@ -185,6 +209,30 @@ async def _main():
             except: peer = await client.get_input_entity(SYS_CFG['target'])
             
             result = await _execute_sequence(client, peer, data)
+            
+            if result:
+                _update_telemetry(result.get("next_scan_minutes", 15), "OK")
+                
+                if result.get("action") == "PUBLISH" and SYS_CFG['webhook']:
+                    requests.post(SYS_CFG['webhook'], json={
+                        "type": "PUBLISH_CONTENT",
+                        "text": result.get("final_text"),
+                        "source_id": result.get("source_id"),
+                        "reply_to_source_id": result.get("reply_to_source_id")
+                    }, timeout=20)
+            else:
+                _update_telemetry(10, "FAIL")
+
+    except Exception as e:
+        traceback.print_exc()
+        _update_telemetry(10, "FAIL")
+    finally:
+        if client and client.is_connected():
+            await client.disconnect()
+
+if __name__ == "__main__":
+    asyncio.run(_main())
+
             
             if result:
                 _update_telemetry(result.get("next_scan_minutes", 15), "OK")
