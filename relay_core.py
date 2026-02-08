@@ -10,7 +10,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 # ==========================================
-# 🔌 PROTOCOL RELAY v8.1 (Button Hunter)
+# 🔌 PROTOCOL RELAY v8.1 (Fixed Indentation)
 # ==========================================
 
 SYS_CFG = {
@@ -70,29 +70,23 @@ async def _wait_for_new_message(client, peer, last_msg_id, timeout=180):
             latest = msgs[0]
             if latest.id > last_msg_id:
                 raw = latest.text or ""
-                # סינון רעשים
                 if len(raw) < 5 or "thinking" in raw.lower() or "typing" in raw.lower():
                     continue 
                 return latest
         except: pass
     return None
 
-# ⭐ הפונקציה החדשה והחכמה ללחיצה
 async def _find_and_click(client, peer, text_match_func, retries=3):
     print(f"[SYS] Hunting for button...")
     
     for attempt in range(retries):
-        # שולפים את ה-5 הודעות האחרונות (לא רק אחת!)
-        # זה קריטי כי לפעמים ה-New הוא הודעה אחת והכפתורים בהודעה קודמת שנערכה
         messages = await client.get_messages(peer, limit=5)
         
         for msg in messages:
             if not msg.buttons: continue
             
-            # סורקים את כל הכפתורים בכל השורות
             for row in msg.buttons:
                 for btn in row:
-                    # מנקים רווחים וסימנים כדי לוודא התאמה
                     clean_text = btn.text.replace('\ufe0f', '').strip()
                     
                     if text_match_func(clean_text):
@@ -101,7 +95,7 @@ async def _find_and_click(client, peer, text_match_func, retries=3):
                         return True
         
         print(f"[WARN] Button not found (Attempt {attempt+1}/{retries}). Waiting...")
-        await asyncio.sleep(3) # מחכים קצת שאולי ההודעה תתעדכן
+        await asyncio.sleep(3)
         
     print("[ERR] Button hunt failed.")
     return False
@@ -123,9 +117,9 @@ async def _execute_sequence(client, peer, payload):
         
         # 1. Send /new
         await client.send_message(peer, CMD_RESET)
-        await asyncio.sleep(4) # חובה לחכות שהבוט יגיב
+        await asyncio.sleep(4)
         
-        # 2. Click Neural Network (מחפש ב-5 הודעות אחרונות)
+        # 2. Click Neural Network
         await _find_and_click(client, peer, lambda t: BTN_L1.lower() in t.lower())
         await asyncio.sleep(4)
         
@@ -209,30 +203,6 @@ async def _main():
             except: peer = await client.get_input_entity(SYS_CFG['target'])
             
             result = await _execute_sequence(client, peer, data)
-            
-            if result:
-                _update_telemetry(result.get("next_scan_minutes", 15), "OK")
-                
-                if result.get("action") == "PUBLISH" and SYS_CFG['webhook']:
-                    requests.post(SYS_CFG['webhook'], json={
-                        "type": "PUBLISH_CONTENT",
-                        "text": result.get("final_text"),
-                        "source_id": result.get("source_id"),
-                        "reply_to_source_id": result.get("reply_to_source_id")
-                    }, timeout=20)
-            else:
-                _update_telemetry(10, "FAIL")
-
-    except Exception as e:
-        traceback.print_exc()
-        _update_telemetry(10, "FAIL")
-    finally:
-        if client and client.is_connected():
-            await client.disconnect()
-
-if __name__ == "__main__":
-    asyncio.run(_main())
-
             
             if result:
                 _update_telemetry(result.get("next_scan_minutes", 15), "OK")
