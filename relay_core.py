@@ -42,15 +42,19 @@ async def _connect_node():
     key = SYS_CFG['auth'].strip() if SYS_CFG['auth'] else ""
     if not key: raise Exception("Auth Missing")
     variants = [key, key[:-1] if len(key)%4 else None, key+'='*(4-len(key)%4) if len(key)%4 else None]
+    
+    last_error = None
     for v in variants:
         if v:
             try:
                 client = TelegramClient(StringSession(v), SYS_CFG['nid'], SYS_CFG['hash'])
                 await client.connect()
                 if await client.get_me(): return client
-            except: pass
-    raise Exception("Connection Failed")
-
+            except Exception as e:
+                last_error = e
+                print(f"[ERR] Login attempt failed: {e}")
+                
+    raise Exception(f"Connection Failed. Reason: {last_error}")
 async def _wait_for_new_message(client, peer, last_msg_id, timeout=180):
     start_time = time.time()
     while (time.time() - start_time) < timeout:
