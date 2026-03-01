@@ -240,7 +240,7 @@ async def _main():
                     except Exception as e:
                         print(f"[ERR] Telemetry request failed: {e}")
                 
-                # פרסום
+# פרסום
                 if result.get("action") == "PUBLISH":
                     if webhook_url:
                         print("[SYS] 🌐 Firing PUBLISH webhook to Google Apps Script...")
@@ -252,6 +252,7 @@ async def _main():
                                 "reply_to_source_id": result.get("reply_to_source_id")
                             }, timeout=20)
                             print(f"[SYS] 🌐 Webhook HTTP Status: {res_w.status_code}")
+                            print(f"[DEBUG] Google Script Answered: {res_w.text[:200]}")
                             if res_w.status_code != 200:
                                 print(f"[DEBUG] Webhook Error Response (Safe Preview): {res_w.text[:100]}")
                         except Exception as e:
@@ -262,7 +263,6 @@ async def _main():
                     print("[SYS] AI chose to SKIP. No webhook fired.")
             else:
                 print("[ERR] ❌ Flow ended without a valid result.")
-
     except Exception as e:
         print("[ERR] Critical crash:")
         traceback.print_exc()
