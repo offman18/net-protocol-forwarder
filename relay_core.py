@@ -244,7 +244,7 @@ async def _main():
             
             result = await _execute_sequence(client, peer, data)
             
-            # --- שלב האימות הקפדני (Validating the Result) ---
+# --- שלב האימות הקפדני (Validating the Result) ---
             is_valid_success = False
             final_text_to_publish = ""
             source_id_to_publish = ""
@@ -255,14 +255,14 @@ async def _main():
                 action = result.get("action")
                 
                 if action == "PUBLISH":
-                    # מחפשים טקסט בכל קומבינציה אפשרית
-                    raw_text = result.get("finaltext") or result.get("final_text") or result.get("text") or result.get("content") or ""
+                    # מחפשים טקסט בכל קומבינציה, כולל קווים תחתונים כפולים (__) שהפילטר של הבוט יוצר
+                    raw_text = result.get("finaltext") or result.get("final_text") or result.get("final__text") or result.get("text") or result.get("content") or ""
                     final_text_to_publish = str(raw_text).strip()
                     
                     if final_text_to_publish:
                         is_valid_success = True
-                        source_id_to_publish = result.get("sourceid") or result.get("source_id") or result.get("id") or ""
-                        reply_to_publish = result.get("replytosourceid") or result.get("reply_to_source_id") or result.get("reply_to")
+                        source_id_to_publish = result.get("sourceid") or result.get("source_id") or result.get("source__id") or result.get("id") or ""
+                        reply_to_publish = result.get("replytosourceid") or result.get("reply_to_source_id") or result.get("reply__to__source__id") or result.get("reply_to")
                     else:
                         print("[ERR] 🚨 AI returned PUBLISH but text is empty/missing. Treating as ERROR.")
                 
@@ -277,7 +277,7 @@ async def _main():
                 # 1. עדכון טיימר (מצב הצלחה - OK)
                 if telemetry_url:
                     try:
-                        scan_mins = result.get("nextscanminutes") or result.get("next_scan_minutes") or result.get("minutes") or 15
+                        scan_mins = result.get("nextscanminutes") or result.get("next_scan_minutes") or result.get("next__scan__minutes") or result.get("minutes") or 15
                         res_t = requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": int(scan_mins), "status": "OK"}, timeout=10)
                         print(f"[SYS] ⏱️ Telemetry (OK) HTTP Status: {res_t.status_code}")
                         timer_updated = True
