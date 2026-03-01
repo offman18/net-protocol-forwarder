@@ -90,7 +90,7 @@ async def _find_and_click(client, peer, text_match_func, retries=3):
     return False
 
 async def _execute_sequence(client, peer, payload):
-    mode = payload.get('mode', 'DATA')
+    mode = 'DATA'
     prompt = payload.get('prompt')
     content = payload.get('content')
     ctx_time = payload.get('time_context', '')
