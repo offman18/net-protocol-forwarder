@@ -171,7 +171,7 @@ async def _execute_sequence(client, peer, payload):
             print("[WARN] Timeout waiting for response")
             return None
         
-       last_id = response_msg.id 
+last_id = response_msg.id 
         raw = response_msg.text or ""
         
         print(f"[DEBUG] Received response from AI. Length: {len(raw)} chars.")
