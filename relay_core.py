@@ -159,8 +159,8 @@ async def _execute_sequence(client, peer, payload):
     
     if sent_msg: last_id = sent_msg.id
 
-    # ==========================================
-    # 🔧 PHASE 3: Polling Response
+# ==========================================
+    # 🔧 PHASE 3: Polling Response (SAFE DEBUG MODE)
     # ==========================================
     print("[SYS] Polling for JSON response...")
     
@@ -172,23 +172,32 @@ async def _execute_sequence(client, peer, payload):
             return None
         
         last_id = response_msg.id 
-        
         raw = response_msg.text or ""
-        clean = re.sub(r'```json\s*|\s*```', '', raw).strip()
+        
+        print(f"[DEBUG] Received response from AI. Length: {len(raw)} chars.")
+        
+        clean = re.sub(r'```(?:json)?\s*|\s*```', '', raw).strip()
         match = re.search(r'\{.*\}', clean, re.DOTALL)
         
         if match:
+            print("[DEBUG] Found { } brackets in response. Attempting JSON parse...")
             try:
                 obj = json.loads(match.group(0))
-                if "action" in obj: return obj
-            except: pass
+                if "action" in obj: 
+                    print(f"[SYS] ✅ Valid JSON parsed successfully! Action: {obj['action']}")
+                    return obj
+                else:
+                    print("[ERR] JSON parsed, but 'action' key is missing!")
+            except Exception as e: 
+                print(f"[ERR] ❌ JSON Parse Failed: {e}")
+                print("[DEBUG] The JSON structure is likely broken or contains unescaped characters.")
+        else:
+            print("[ERR] ❌ Could not find valid { } JSON format in the AI's response.")
         
         if len(raw) > 50:
-            print(f"[WARN] Invalid JSON (Attempt {attempt+1}/3). Requesting fix...")
+            print(f"[WARN] Invalid JSON (Attempt {attempt+1}/3). Requesting fix from AI...")
             sent_fix = await client.send_message(peer, ERR_MSG)
             last_id = sent_fix.id
-        else:
-            pass 
 
     return None
 
@@ -198,8 +207,11 @@ async def _main():
 
     try:
         data = json.loads(blob)
-        if data.get('force_reset'): data['mode'] = 'INIT'
-    except: return
+        # זמנית - כופה מצב DATA כדי שנוכל לבדוק מיד
+        data['mode'] = 'DATA'
+    except Exception as e: 
+        print(f"[ERR] Payload load failed: {e}")
+        return
 
     client = None
     try:
@@ -211,21 +223,49 @@ async def _main():
             result = await _execute_sequence(client, peer, data)
             
             if result:
-                _update_telemetry(result.get("next_scan_minutes", 15), "OK")
+                print("[SYS] Action decided. Attempting to trigger Google Script...")
                 
-                if result.get("action") == "PUBLISH" and SYS_CFG['webhook']:
-                    requests.post(SYS_CFG['webhook'], json={
-                        "type": "PUBLISH_CONTENT",
-                        "text": result.get("final_text"),
-                        "source_id": result.get("source_id"),
-                        "reply_to_source_id": result.get("reply_to_source_id")
-                    }, timeout=20)
+                webhook_url = SYS_CFG['webhook']
+                telemetry_url = SYS_CFG['telemetry']
+                
+                # בדיקה בטוחה אם הכתובות בכלל קיימות (ללא הדפסתן)
+                print(f"[DEBUG] Webhook configured: {'YES' if webhook_url else 'NO ⚠️'}")
+                print(f"[DEBUG] Telemetry configured: {'YES' if telemetry_url else 'NO ⚠️'}")
+
+                # עדכון טיימר
+                if telemetry_url:
+                    try:
+                        res_t = requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": result.get("next_scan_minutes", 15), "status": "OK"}, timeout=10)
+                        print(f"[SYS] ⏱️ Telemetry HTTP Status: {res_t.status_code}")
+                    except Exception as e:
+                        print(f"[ERR] Telemetry request failed: {e}")
+                
+                # פרסום
+                if result.get("action") == "PUBLISH":
+                    if webhook_url:
+                        print("[SYS] 🌐 Firing PUBLISH webhook to Google Apps Script...")
+                        try:
+                            res_w = requests.post(webhook_url, json={
+                                "type": "PUBLISH_CONTENT",
+                                "text": result.get("final_text", ""),
+                                "source_id": result.get("source_id", ""),
+                                "reply_to_source_id": result.get("reply_to_source_id")
+                            }, timeout=20)
+                            print(f"[SYS] 🌐 Webhook HTTP Status: {res_w.status_code}")
+                            if res_w.status_code != 200:
+                                print(f"[DEBUG] Webhook Error Response (Safe Preview): {res_w.text[:100]}")
+                        except Exception as e:
+                            print(f"[ERR] ❌ Webhook request crashed: {e}")
+                    else:
+                        print("[ERR] 🛑 Action is PUBLISH but SYNC_ENDPOINT is empty!")
+                else:
+                    print("[SYS] AI chose to SKIP. No webhook fired.")
             else:
-                _update_telemetry(10, "FAIL")
+                print("[ERR] ❌ Flow ended without a valid result.")
 
     except Exception as e:
+        print("[ERR] Critical crash:")
         traceback.print_exc()
-        _update_telemetry(10, "FAIL")
     finally:
         if client and client.is_connected():
             await client.disconnect()
