@@ -171,10 +171,17 @@ async def _execute_sequence(client, peer, payload):
             print("[WARN] Timeout waiting for response")
             return None
         
-        last_id = response_msg.id 
+       last_id = response_msg.id 
         raw = response_msg.text or ""
         
         print(f"[DEBUG] Received response from AI. Length: {len(raw)} chars.")
+        
+        # --- התוספת החדשה זיהוי שגיאה מהבוט ---
+        if "error" in raw.lower():
+            print("[WARN] 🛑 Bot returned an ERROR message! Aborting retry and sleeping for 10 minutes.")
+            # מחזירים אובייקט שאומר למערכת לדלג על הפרסום ולחזור עוד 10 דקות
+            return {"action": "SKIP", "next_scan_minutes": 10, "reason": "Bot Error"}
+        # ----------------------------------------
         
         clean = re.sub(r'```(?:json)?\s*|\s*```', '', raw).strip()
         match = re.search(r'\{.*\}', clean, re.DOTALL)
