@@ -160,8 +160,8 @@ async def _execute_sequence(client, peer, payload):
     
     if sent_msg: last_id = sent_msg.id
 
-    # ==========================================
-    # 🔧 PHASE 3: Polling Response (SAFE DEBUG MODE)
+# ==========================================
+    # 🔧 PHASE 3: Polling Response (ROBUST MODE)
     # ==========================================
     print("[SYS] Polling for JSON response...")
     
@@ -177,28 +177,45 @@ async def _execute_sequence(client, peer, payload):
         
         print(f"[DEBUG] Received response from AI. Length: {len(raw)} chars.")
         
-        if "error" in raw.lower():
-            print("[WARN] 🛑 Bot returned an ERROR message! Aborting retry and sleeping for 10 minutes.")
-            return {"action": "SKIP", "next_scan_minutes": 10, "reason": "Bot Error"}
-        
-        clean = re.sub(r'```(?:json)?\s*|\s*```', '', raw).strip()
-        match = re.search(r'\{.*\}', clean, re.DOTALL)
+        # שלב 1: חותכים רק את מה שבין הסוגריים המסולסלים 
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
         
         if match:
-            print("[DEBUG] Found { } brackets in response. Attempting JSON parse...")
+            json_str = match.group(0)
+            print("[DEBUG] Extracting JSON payload. Applying heavy sanitization...")
+            
+            # --- 🛡️ שכבת מגן: ניקוי רעלים מהטקסט ---
+            json_str = json_str.replace('“', '"').replace('”', '"').replace('‘', "'").replace('’', "'")
+            json_str = json_str.replace('\u200b', '').replace('\xa0', ' ')
+            json_str = re.sub(r',\s*\}', '}', json_str)
+            json_str = re.sub(r',\s*\]', ']', json_str)
+            
+            parsed_obj = None
             try:
-                obj = json.loads(match.group(0))
-                if "action" in obj: 
-                    print(f"[SYS] ✅ Valid JSON parsed successfully! Action: {obj['action']}")
-                    return obj
+                # strict=False מרשה לפייתון להתעלם מתווי בקרה
+                parsed_obj = json.loads(json_str, strict=False)
+            except Exception as e1:
+                print(f"[WARN] First parse failed ({e1}). Attempting Nuclear Clean...")
+                try:
+                    # ניסיון גרעיני: המרת ירידות שורה פיזיות לתווי \n
+                    nuclear_str = json_str.replace('\n', '\\n').replace('\r', '')
+                    parsed_obj = json.loads(nuclear_str, strict=False)
+                except Exception as e2:
+                    print(f"[ERR] ❌ JSON Parse Failed Completely: {e2}")
+                    print(f"[DEBUG] Broken JSON snippet: {json_str[:300]}")
+            
+            # בדיקה האם חילצנו אובייקט תקין ויש בו "action"
+            if parsed_obj and isinstance(parsed_obj, dict):
+                if "action" in parsed_obj:
+                    print(f"[SYS] ✅ Valid JSON parsed successfully! Action: {parsed_obj['action']}")
+                    return parsed_obj
                 else:
                     print("[ERR] JSON parsed, but 'action' key is missing!")
-            except Exception as e: 
-                print(f"[ERR] ❌ JSON Parse Failed: {e}")
-                print("[DEBUG] The JSON structure is likely broken or contains unescaped characters.")
+                    
         else:
-            print("[ERR] ❌ Could not find valid { } JSON format in the AI's response.")
+            print("[ERR] ❌ Could not find { } brackets in response.")
         
+        # אם הגיע לכאן, סימן שהקריאה נכשלה. נבקש מה-AI לתקן.
         if len(raw) > 50:
             print(f"[WARN] Invalid JSON (Attempt {attempt+1}/3). Requesting fix from AI...")
             sent_fix = await client.send_message(peer, ERR_MSG)
