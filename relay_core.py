@@ -177,6 +177,11 @@ async def _execute_sequence(client, peer, payload):
         
         print(f"[DEBUG] Received response from AI. Length: {len(raw)} chars.")
         
+        # ⭐ מנגנון עצירה מיידית: אם ה-AI מדווח על שגיאה
+        if "ERROR" in raw.upper():
+            print("[ERR] 🚨 AI explicitly returned an ERROR! Aborting JSON hunt.")
+            return None # זורק אותנו ישר ל-10 דקות המתנה בפונקציה הראשית
+            
         # שלב 1: חותכים רק את מה שבין הסוגריים המסולסלים 
         match = re.search(r'\{.*\}', raw, re.DOTALL)
         
@@ -215,7 +220,7 @@ async def _execute_sequence(client, peer, payload):
         else:
             print("[ERR] ❌ Could not find { } brackets in response.")
         
-        # אם הגיע לכאן, סימן שהקריאה נכשלה. נבקש מה-AI לתקן.
+        # אם הגיע לכאן (ולא היה ERROR במפורש), נבקש מה-AI לתקן.
         if len(raw) > 50:
             print(f"[WARN] Invalid JSON (Attempt {attempt+1}/3). Requesting fix from AI...")
             sent_fix = await client.send_message(peer, ERR_MSG)
@@ -225,14 +230,19 @@ async def _execute_sequence(client, peer, payload):
 
 async def _main():
     blob = SYS_CFG['payload']
+    telemetry_url = SYS_CFG['telemetry']
+    webhook_url = SYS_CFG['webhook']
+    timer_updated = False  # 🛡️ משתנה המעקב הקריטי
+
     if not blob: return
 
     try:
         data = json.loads(blob)
-        data['mode'] = 'DATA'
+        # הערה: השורה הבאה כופה מצב DATA לבדיקות, כשתרצה שהמערכת תאתחל את עצמה בבוקר (INIT) תמחק אותה
+        data['mode'] = 'DATA' 
     except Exception as e: 
         print(f"[ERR] Payload load failed: {e}")
-        return
+        # השגיאה תיתפס בסוף ותשלח 10 דקות
 
     client = None
     try:
@@ -245,33 +255,26 @@ async def _main():
             
             if result:
                 print("[SYS] Action decided. Attempting to trigger Google Script...")
-                
-                # הדפסת המפתחות שה-AI אשכרה החזיר לנו:
                 print(f"[DEBUG] AI JSON Keys found: {list(result.keys())}")
                 
-                webhook_url = SYS_CFG['webhook']
-                telemetry_url = SYS_CFG['telemetry']
-                
                 # -----------------------------------------
-                # 1. עדכון טיימר (עם רשת ביטחון לשם המפתח)
+                # 1. עדכון טיימר (מצב הצלחה - OK)
                 # -----------------------------------------
                 if telemetry_url:
                     try:
                         scan_mins = result.get("next_scan_minutes") or result.get("minutes") or result.get("next_scan") or result.get("time") or 15
-                        res_t = requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": scan_mins, "status": "OK"}, timeout=10)
-                        print(f"[SYS] ⏱️ Telemetry HTTP Status: {res_t.status_code}")
-                        print(f"[DEBUG] Telemetry Answered: {res_t.text[:100]}")
+                        res_t = requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": int(scan_mins), "status": "OK"}, timeout=10)
+                        print(f"[SYS] ⏱️ Telemetry (OK) HTTP Status: {res_t.status_code}")
+                        timer_updated = True # ✅ סימון שהטיימר עודכן בהצלחה
                     except Exception as e:
                         print(f"[ERR] Telemetry request failed: {e}")
                 
                 # -----------------------------------------
-                # 2. פרסום לטלגרם (עם רשת ביטחון לטקסט)
+                # 2. פרסום לטלגרם
                 # -----------------------------------------
                 if result.get("action") == "PUBLISH":
                     if webhook_url:
                         print("[SYS] 🌐 Firing PUBLISH webhook to Google Apps Script...")
-                        
-                        # שליפת הטקסט מכל שם אפשרי שה-AI עלול להמציא
                         final_text = result.get("final_text") or result.get("text") or result.get("content") or "⚠️ תקלה: ה-AI לא החזיר טקסט ב-JSON."
                         source_id = result.get("source_id") or result.get("id") or ""
                         reply_to = result.get("reply_to_source_id") or result.get("reply_to")
@@ -284,22 +287,44 @@ async def _main():
                                 "reply_to_source_id": reply_to
                             }, timeout=20)
                             print(f"[SYS] 🌐 Webhook HTTP Status: {res_w.status_code}")
-                            print(f"[DEBUG] Webhook Answered: {res_w.text[:100]}")
                         except Exception as e:
                             print(f"[ERR] ❌ Webhook request crashed: {e}")
                     else:
                         print("[ERR] 🛑 Action is PUBLISH but SYNC_ENDPOINT is empty!")
                 else:
                     print("[SYS] AI chose to SKIP. No webhook fired.")
+            
             else:
-                print("[ERR] ❌ Flow ended without a valid result.")
+                # -----------------------------------------
+                # ⭐ מנגנון חירום 1: ה-AI שלח ERROR או שתק
+                # -----------------------------------------
+                print("[ERR] ❌ Flow ended without a valid result (ERROR state).")
+                if telemetry_url:
+                    print("[SYS] ⏱️ Sending FAIL status to scanner... Forcing 10 minutes wait.")
+                    try:
+                        res_fail = requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": 10, "status": "FAIL"}, timeout=10)
+                        print(f"[SYS] ⏱️ Telemetry (FAIL) HTTP Status: {res_fail.status_code}")
+                        timer_updated = True # ✅ סימון שהטיימר עודכן למצב חירום
+                    except Exception as e:
+                        print(f"[ERR] Telemetry fail request crashed: {e}")
 
     except Exception as e:
-        print("[ERR] Critical crash:")
+        print(f"[ERR] Critical crash during execution: {e}")
         traceback.print_exc()
+        
     finally:
         if client and client.is_connected():
             await client.disconnect()
+            
+        # -----------------------------------------
+        # 🛡️ מנגנון חירום 2: חומת המגן הקריטית לקריסות סקריפט
+        # -----------------------------------------
+        if not timer_updated and telemetry_url:
+            print("[SYS] 🛡️ ULTIMATE FALLBACK: Script crashed unexpectedly. Forcing 10 min wait.")
+            try:
+                requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": 10, "status": "FAIL"}, timeout=10)
+            except Exception as e:
+                print(f"[ERR] Ultimate fallback also failed: {e}")
 
 if __name__ == "__main__":
     asyncio.run(_main())
