@@ -229,7 +229,6 @@ async def _main():
 
     try:
         data = json.loads(blob)
-        # זמנית - כופה מצב DATA כדי שנוכל לבדוק מיד
         data['mode'] = 'DATA'
     except Exception as e: 
         print(f"[ERR] Payload load failed: {e}")
@@ -247,36 +246,45 @@ async def _main():
             if result:
                 print("[SYS] Action decided. Attempting to trigger Google Script...")
                 
+                # הדפסת המפתחות שה-AI אשכרה החזיר לנו:
+                print(f"[DEBUG] AI JSON Keys found: {list(result.keys())}")
+                
                 webhook_url = SYS_CFG['webhook']
                 telemetry_url = SYS_CFG['telemetry']
                 
-                # בדיקה בטוחה אם הכתובות בכלל קיימות (ללא הדפסתן)
-                print(f"[DEBUG] Webhook configured: {'YES' if webhook_url else 'NO ⚠️'}")
-                print(f"[DEBUG] Telemetry configured: {'YES' if telemetry_url else 'NO ⚠️'}")
-
-                # עדכון טיימר
+                # -----------------------------------------
+                # 1. עדכון טיימר (עם רשת ביטחון לשם המפתח)
+                # -----------------------------------------
                 if telemetry_url:
                     try:
-                        res_t = requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": result.get("next_scan_minutes", 15), "status": "OK"}, timeout=10)
+                        scan_mins = result.get("next_scan_minutes") or result.get("minutes") or result.get("next_scan") or result.get("time") or 15
+                        res_t = requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": scan_mins, "status": "OK"}, timeout=10)
                         print(f"[SYS] ⏱️ Telemetry HTTP Status: {res_t.status_code}")
+                        print(f"[DEBUG] Telemetry Answered: {res_t.text[:100]}")
                     except Exception as e:
                         print(f"[ERR] Telemetry request failed: {e}")
                 
-                # פרסום
+                # -----------------------------------------
+                # 2. פרסום לטלגרם (עם רשת ביטחון לטקסט)
+                # -----------------------------------------
                 if result.get("action") == "PUBLISH":
                     if webhook_url:
                         print("[SYS] 🌐 Firing PUBLISH webhook to Google Apps Script...")
+                        
+                        # שליפת הטקסט מכל שם אפשרי שה-AI עלול להמציא
+                        final_text = result.get("final_text") or result.get("text") or result.get("content") or "⚠️ תקלה: ה-AI לא החזיר טקסט ב-JSON."
+                        source_id = result.get("source_id") or result.get("id") or ""
+                        reply_to = result.get("reply_to_source_id") or result.get("reply_to")
+                        
                         try:
                             res_w = requests.post(webhook_url, json={
                                 "type": "PUBLISH_CONTENT",
-                                "text": result.get("final_text", ""),
-                                "source_id": result.get("source_id", ""),
-                                "reply_to_source_id": result.get("reply_to_source_id")
+                                "text": final_text,
+                                "source_id": source_id,
+                                "reply_to_source_id": reply_to
                             }, timeout=20)
                             print(f"[SYS] 🌐 Webhook HTTP Status: {res_w.status_code}")
-                            print(f"[DEBUG] Google Script Answered: {res_w.text[:200]}")
-                            if res_w.status_code != 200:
-                                print(f"[DEBUG] Webhook Error Response (Safe Preview): {res_w.text[:100]}")
+                            print(f"[DEBUG] Webhook Answered: {res_w.text[:100]}")
                         except Exception as e:
                             print(f"[ERR] ❌ Webhook request crashed: {e}")
                     else:
@@ -285,6 +293,7 @@ async def _main():
                     print("[SYS] AI chose to SKIP. No webhook fired.")
             else:
                 print("[ERR] ❌ Flow ended without a valid result.")
+
     except Exception as e:
         print("[ERR] Critical crash:")
         traceback.print_exc()
