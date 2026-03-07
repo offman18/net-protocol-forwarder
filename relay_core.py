@@ -236,24 +236,31 @@ async def _main():
     blob = SYS_CFG['payload']
     telemetry_url = SYS_CFG['telemetry']
     webhook_url = SYS_CFG['webhook']
-    timer_updated = False  # משתנה המעקב הקריטי לקריסות קשות
+    timer_updated = False  
 
-    if not blob: return
+    if not blob: 
+        print("[SYS] No payload found. Exiting.")
+        return
 
-try:
+    try:
         data = json.loads(blob)
     except Exception as e: 
         print(f"[ERR] Payload load failed: {e}")
+        return
+
     client = None
     try:
         client = await _connect_node()
         async with client:
-            try: peer = await client.get_entity(SYS_CFG['target'])
-            except: peer = await client.get_input_entity(SYS_CFG['target'])
+            try: 
+                peer = await client.get_entity(SYS_CFG['target'])
+            except: 
+                peer = await client.get_input_entity(SYS_CFG['target'])
             
+            # ביצוע הרצף מול ה-AI
             result = await _execute_sequence(client, peer, data)
             
-# --- שלב האימות הקפדני (Validating the Result) ---
+            # --- שלב האימות הקפדני (Validating the Result) ---
             is_valid_success = False
             final_text_to_publish = ""
             source_id_to_publish = ""
@@ -264,16 +271,20 @@ try:
                 action = result.get("action")
                 
                 if action == "PUBLISH":
-                    # מחפשים טקסט בכל קומבינציה, כולל קווים תחתונים כפולים (__) שהפילטר של הבוט יוצר
-                    raw_text = result.get("finaltext") or result.get("final_text") or result.get("final__text") or result.get("text") or result.get("content") or ""
+                    # בדיקת שדות גמישה (תמיכה בכל הווריאציות של ג'מיני)
+                    raw_text = (result.get("finaltext") or result.get("final_text") or 
+                                result.get("final__text") or result.get("text") or 
+                                result.get("content") or "")
                     final_text_to_publish = str(raw_text).strip()
                     
                     if final_text_to_publish:
                         is_valid_success = True
-                        source_id_to_publish = result.get("sourceid") or result.get("source_id") or result.get("source__id") or result.get("id") or ""
-                        reply_to_publish = result.get("replytosourceid") or result.get("reply_to_source_id") or result.get("reply__to__source__id") or result.get("reply_to")
+                        source_id_to_publish = (result.get("sourceid") or result.get("source_id") or 
+                                               result.get("source__id") or result.get("id") or "")
+                        reply_to_publish = (result.get("replytosourceid") or result.get("reply_to_source_id") or 
+                                           result.get("reply__to__source__id") or result.get("reply_to"))
                     else:
-                        print("[ERR] 🚨 AI returned PUBLISH but text is empty/missing. Treating as ERROR.")
+                        print("[ERR] 🚨 AI returned PUBLISH but text is empty.")
                 
                 elif action == "SKIP":
                     is_valid_success = True
@@ -283,19 +294,20 @@ try:
             if is_valid_success:
                 print("[SYS] Flow validated successfully. Proceeding with triggers...")
                 
-                # 1. עדכון טיימר (מצב הצלחה - OK)
+                # 1. עדכון טיימר (מצב הצלחה)
                 if telemetry_url:
                     try:
-                        scan_mins = result.get("nextscanminutes") or result.get("next_scan_minutes") or result.get("next__scan__minutes") or result.get("minutes") or 15
+                        scan_mins = (result.get("nextscanminutes") or result.get("next_scan_minutes") or 
+                                     result.get("next__scan__minutes") or result.get("minutes") or 15)
                         res_t = requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": int(scan_mins), "status": "OK"}, timeout=10)
                         print(f"[SYS] ⏱️ Telemetry (OK) HTTP Status: {res_t.status_code}")
                         timer_updated = True
                     except Exception as e:
                         print(f"[ERR] Telemetry request failed: {e}")
                 
-                # 2. פרסום לטלגרם (רק אם זה PUBLISH)
-                if result.get("action") == "PUBLISH" and webhook_url:
-                    print("[SYS] 🌐 Firing PUBLISH webhook to Google Apps Script...")
+                # 2. פרסום (Webhook)
+                if result and result.get("action") == "PUBLISH" and webhook_url:
+                    print("[SYS] 🌐 Firing PUBLISH webhook...")
                     try:
                         res_w = requests.post(webhook_url, json={
                             "type": "PUBLISH_CONTENT",
@@ -305,38 +317,27 @@ try:
                         }, timeout=20)
                         print(f"[SYS] 🌐 Webhook HTTP Status: {res_w.status_code}")
                     except Exception as e:
-                        print(f"[ERR] ❌ Webhook request crashed: {e}")
-            
+                        print(f"[ERR] ❌ Webhook crashed: {e}")
             else:
-                # -----------------------------------------
-                # ⭐ מנגנון חירום 1: טקסט ריק, JSON שבור או ERROR מפורש
-                # -----------------------------------------
+                # מנגנון חירום: תוצאה לא תקינה
                 print("[ERR] ❌ Flow ended with invalid result. Triggering 10-minute fallback.")
                 if telemetry_url:
                     try:
                         res_fail = requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": 10, "status": "FAIL"}, timeout=10)
                         print(f"[SYS] ⏱️ Telemetry (FAIL) HTTP Status: {res_fail.status_code}")
                         timer_updated = True
-                    except Exception as e:
-                        print(f"[ERR] Telemetry fail request crashed: {e}")
+                    except: pass
 
     except Exception as e:
         print(f"[ERR] Critical crash during execution: {e}")
         traceback.print_exc()
-        
+        if not timer_updated and telemetry_url:
+            try:
+                requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": 10, "status": "FAIL"}, timeout=10)
+            except: pass
     finally:
         if client and client.is_connected():
             await client.disconnect()
-            
-        # -----------------------------------------
-        # 🛡️ מנגנון חירום 2: חומת המגן הקריטית (אם פייתון קרס לחלוטין)
-        # -----------------------------------------
-        if not timer_updated and telemetry_url:
-            print("[SYS] 🛡️ ULTIMATE FALLBACK: Script crashed unexpectedly. Forcing 10 min wait.")
-            try:
-                requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": 10, "status": "FAIL"}, timeout=10)
-            except Exception as e:
-                print(f"[ERR] Ultimate fallback also failed: {e}")
 
 if __name__ == "__main__":
     asyncio.run(_main())
