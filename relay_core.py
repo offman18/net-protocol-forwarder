@@ -91,7 +91,7 @@ async def _find_and_click(client, peer, text_match_func, retries=3):
     return False
 
 async def _execute_sequence(client, peer, payload):
-    mode = 'DATA'
+    mode = payload.get('mode', 'DATA') 
     prompt = payload.get('prompt')
     content = payload.get('content')
     ctx_time = payload.get('time_context', '')
@@ -115,12 +115,23 @@ async def _execute_sequence(client, peer, payload):
         await _find_and_click(client, peer, lambda t: BTN_L1.lower() in t.lower())
         await asyncio.sleep(4)
         
-        # 3. Click Gemini
+# 3. Click Gemini
         await _find_and_click(client, peer, lambda t: BTN_L2.lower() in t.lower())
         await asyncio.sleep(4)
         
-        # 4. Click Gemini 3 (חיפוש מדויק)
-        await _find_and_click(client, peer, lambda t: 'gemini' in t.lower() and '3' in t.lower())
+        # 4. Click Target Model (Dynamic Search)
+        target_model = payload.get('target_model', 'GEMINI_3')
+        
+        model_btn_map = {
+            'GEMINI_3': 'gemini 3',
+            'GEMINI_3_FLASH': 'gemini 3 flash',
+            'GEMINI_2_5_FLASH': 'gemini 2.5 flash'
+        }
+        
+        btn_text_to_find = model_btn_map.get(target_model, 'gemini 3')
+        print(f"[SYS] Looking for dynamic model button: '{btn_text_to_find}'")
+        
+        await _find_and_click(client, peer, lambda t: btn_text_to_find in t.lower())
         await asyncio.sleep(4)
         
         # 5. Click Create -->
@@ -229,12 +240,10 @@ async def _main():
 
     if not blob: return
 
-    try:
+try:
         data = json.loads(blob)
-        data['mode'] = 'DATA' # כופה מצב DATA לבדיקות
     except Exception as e: 
         print(f"[ERR] Payload load failed: {e}")
-
     client = None
     try:
         client = await _connect_node()
