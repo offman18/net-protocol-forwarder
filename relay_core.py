@@ -10,7 +10,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 # ==========================================
-# 🔌 PROTOCOL RELAY v8.3 (Full Sync Wait)
+# 🔌 PROTOCOL RELAY v8.4 Fast (2s poll, 60s timeout)
 # ==========================================
 
 SYS_CFG = {
@@ -56,10 +56,10 @@ async def _connect_node():
                 
     raise Exception(f"Connection Failed. Reason: {last_error}")
 
-async def _wait_for_new_message(client, peer, last_msg_id, timeout=180):
+async def _wait_for_new_message(client, peer, last_msg_id, timeout=60):
     start_time = time.time()
     while (time.time() - start_time) < timeout:
-        await asyncio.sleep(5)
+        await asyncio.sleep(2)
         try:
             msgs = await client.get_messages(peer, limit=1)
             if not msgs: continue
@@ -86,7 +86,7 @@ async def _find_and_click(client, peer, text_match_func, retries=3):
                         print(f"[SYS] 👉 Clicked: '{clean_text}' (MsgID: {msg.id})")
                         await btn.click()
                         return True
-        await asyncio.sleep(3)
+        await asyncio.sleep(1.5)
     print("[ERR] Button hunt failed.")
     return False
 
@@ -109,15 +109,15 @@ async def _execute_sequence(client, peer, payload):
         # 1. Send /new
         sent = await client.send_message(peer, CMD_RESET)
         last_id = sent.id # עדכון כדי שלא נתבלבל
-        await asyncio.sleep(4)
+        await asyncio.sleep(2)
         
         # 2. Click Neural Network
         await _find_and_click(client, peer, lambda t: BTN_L1.lower() in t.lower())
-        await asyncio.sleep(4)
+        await asyncio.sleep(2)
         
 # 3. Click Gemini
         await _find_and_click(client, peer, lambda t: BTN_L2.lower() in t.lower())
-        await asyncio.sleep(4)
+        await asyncio.sleep(2)
         
         # 4. Click Target Model (Dynamic Search)
         target_model = payload.get('target_model', 'GEMINI_3')
@@ -132,11 +132,11 @@ async def _execute_sequence(client, peer, payload):
         print(f"[SYS] Looking for dynamic model button: '{btn_text_to_find}'")
         
         await _find_and_click(client, peer, lambda t: btn_text_to_find in t.lower())
-        await asyncio.sleep(4)
+        await asyncio.sleep(2)
         
         # 5. Click Create -->
         await _find_and_click(client, peer, lambda t: 'create' in t.lower() or '-->' in t)
-        await asyncio.sleep(4)
+        await asyncio.sleep(2)
         
         # 6. Send Prompt & WAIT FOR ACK
         if prompt:
@@ -146,7 +146,7 @@ async def _execute_sequence(client, peer, payload):
             
             print("[SYS] Waiting for Prompt ACK...")
             # ⭐ ההמתנה הקריטית: מחכים שהבוט יגיד "הבנתי"
-            ack_msg = await _wait_for_new_message(client, peer, last_id, timeout=60)
+            ack_msg = await _wait_for_new_message(client, peer, last_id, timeout=30)
             
             if ack_msg:
                 print("[SYS] Prompt acknowledged. Moving to Data Phase.")
@@ -176,7 +176,7 @@ async def _execute_sequence(client, peer, payload):
     # ==========================================
     print("[SYS] Polling for JSON response (Single Attempt)...")
     
-    response_msg = await _wait_for_new_message(client, peer, last_id, timeout=180)
+    response_msg = await _wait_for_new_message(client, peer, last_id, timeout=60)
     
     if not response_msg:
         print("[WARN] Timeout waiting for response. Aborting.")
@@ -298,7 +298,7 @@ async def _main():
                 if telemetry_url:
                     try:
                         scan_mins = (result.get("nextscanminutes") or result.get("next_scan_minutes") or 
-                                     result.get("next__scan__minutes") or result.get("minutes") or 15)
+                                     result.get("next__scan__minutes") or result.get("minutes") or 3)
                         res_t = requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": int(scan_mins), "status": "OK"}, timeout=10)
                         print(f"[SYS] ⏱️ Telemetry (OK) HTTP Status: {res_t.status_code}")
                         timer_updated = True
@@ -320,10 +320,10 @@ async def _main():
                         print(f"[ERR] ❌ Webhook crashed: {e}")
             else:
                 # מנגנון חירום: תוצאה לא תקינה
-                print("[ERR] ❌ Flow ended with invalid result. Triggering 10-minute fallback.")
+                print("[ERR] ❌ Flow ended with invalid result. Triggering 3-minute fallback.")
                 if telemetry_url:
                     try:
-                        res_fail = requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": 10, "status": "FAIL"}, timeout=10)
+                        res_fail = requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": 3, "status": "FAIL"}, timeout=10)
                         print(f"[SYS] ⏱️ Telemetry (FAIL) HTTP Status: {res_fail.status_code}")
                         timer_updated = True
                     except: pass
@@ -333,7 +333,7 @@ async def _main():
         traceback.print_exc()
         if not timer_updated and telemetry_url:
             try:
-                requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": 10, "status": "FAIL"}, timeout=10)
+                requests.post(telemetry_url, json={"type": "UPDATE_TIMER", "minutes": 3, "status": "FAIL"}, timeout=10)
             except: pass
     finally:
         if client and client.is_connected():
