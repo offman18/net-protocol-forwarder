@@ -30,5 +30,6 @@ jobs:
           REMOTE_HOST_REF: ${{ secrets.REMOTE_HOST_REF }}
           TELEMETRY_ENDPOINT: ${{ secrets.TELEMETRY_ENDPOINT }}
           SYNC_ENDPOINT: ${{ secrets.SYNC_ENDPOINT }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           INCOMING_BLOB: ${{ github.event.client_payload.blob }}
         run: python -u relay_core.py

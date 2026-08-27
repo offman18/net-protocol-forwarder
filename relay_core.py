@@ -10,7 +10,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 # ==========================================
-# 🔌 PROTOCOL RELAY v8.4 Fast (2s poll, 60s timeout)
+# 🔌 PROTOCOL RELAY v8.5 Kimi Judge + Backup (kimi-k3 -> kimi-k2.6)
 # ==========================================
 
 SYS_CFG = {
@@ -22,6 +22,83 @@ SYS_CFG = {
     'webhook': os.environ.get('SYNC_ENDPOINT', ''),
     'payload': os.environ.get('INCOMING_BLOB', '')
 }
+
+# Kimi judge/backup via Nvidia NIM
+NVIDIA_KEY = os.environ.get('NVIDIA_API_KEY', '').strip()
+KIMI_MODELS = ["moonshotai/kimi-k3", "moonshotai/kimi-k2.6", "openai/gpt-oss-20b"]
+
+def _call_nvidia(model, messages, max_tokens=800):
+    if not NVIDIA_KEY:
+        return None
+    try:
+        r = requests.post("https://integrate.api.nvidia.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {NVIDIA_KEY}", "Content-Type": "application/json"},
+            json={"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.7},
+            timeout=25)
+        if r.status_code == 200:
+            j = r.json()
+            return j['choices'][0]['message'].get('content','')
+        else:
+            print(f"[KIMI] {model} HTTP {r.status_code}: {r.text[:120]}")
+    except Exception as e:
+        print(f"[KIMI] {model} ERR {e}")
+    return None
+
+def _kimi_judge(proposed_text, history_hint=""):
+    """Kimi as judge: receives 30 last msgs hint + proposed, returns edited final_text or None"""
+    if not NVIDIA_KEY or not proposed_text:
+        return None
+    judge_prompt = f"""אתה שופט עורך חדשות בזק. קיבלת הצעה לפרסום:
+"{proposed_text}"
+היסטוריה (30 אחרונות רמז): {history_hint[:1500]}
+
+משימה: ערוך את ההצעה להיות קריאה, בלי אמרת שפר, בלי פרשנות, בלי "דרמה.".
+אם זה סקר - חובה רשימה אנכית עם • ו-<b> לכותרת.
+החזר אך ורק JSON: {{"final_text":"הטקסט הערוך"}} בלי שום מילה נוספת."""
+    for model in KIMI_MODELS:
+        content = _call_nvidia(model, [{"role":"user","content": judge_prompt}])
+        if content:
+            try:
+                m = re.search(r'\{.*\}', content, re.DOTALL)
+                if m:
+                    obj = json.loads(m.group(0))
+                    edited = obj.get('final_text') or obj.get('finalText') or obj.get('text')
+                    if edited and len(edited.strip()) > 5:
+                        print(f"[KIMI] Judge {model} edited: {edited[:60]}...")
+                        return edited.strip()
+            except Exception as e:
+                print(f"[KIMI] Judge parse fail {model}: {e}")
+                continue
+    return None
+
+def _kimi_generate_fallback(data_payload):
+    """Kimi as backup generator if Gemini fails: tries to generate PUBLISH/SKIP directly"""
+    if not NVIDIA_KEY:
+        return None
+    fallback_prompt = f"""אתה עורך חדשות בזק. קיבלת DATA:
+{data_payload.get('content','')[:3000]}
+
+החזר אך ורק JSON: {{"action":"PUBLISH","final_text":"<b>כותרת</b> טקסט","source_id":"id","reply_to_source_id":null,"next_scan_minutes":3}} או {{"action":"SKIP","final_text":"","source_id":"","reply_to_source_id":null,"next_scan_minutes":3}}
+אם זה לא על בחירות/חדשות חשובה -> SKIP. אם זה סקר -> רשימה עם •."""
+    for model in KIMI_MODELS:
+        content = _call_nvidia(model, [{"role":"user","content": fallback_prompt}], max_tokens=600)
+        if content:
+            try:
+                m = re.search(r'\{.*\}', content, re.DOTALL)
+                if m:
+                    obj = json.loads(m.group(0))
+                    if obj.get('action') in ('PUBLISH','SKIP'):
+                        print(f"[KIMI] Fallback {model} -> {obj.get('action')}")
+                        # Second judge call on fallback result
+                        if obj.get('action') == 'PUBLISH' and obj.get('final_text'):
+                            edited = _kimi_judge(obj['final_text'])
+                            if edited:
+                                obj['final_text'] = edited
+                        return obj
+            except Exception as e:
+                print(f"[KIMI] Fallback parse {model}: {e}")
+                continue
+    return None
 
 CMD_RESET = "/" + "n" + "e" + "w"
 BTN_L1 = "".join(["Neu", "ral", " net", "work"])
@@ -259,6 +336,26 @@ async def _main():
             
             # ביצוע הרצף מול ה-AI
             result = await _execute_sequence(client, peer, data)
+
+            # === Kimi judge + backup (Nvidia) ===
+            # אם Gemini הצליח -> Kimi כשופט עורך (30 הודעות רמז)
+            if result and result.get('action') == 'PUBLISH':
+                try:
+                    edited = _kimi_judge(result.get('final_text',''), str(data.get('content',''))[:1000])
+                    if edited:
+                        print(f"[KIMI] Judge edited text applied")
+                        result['final_text'] = edited
+                except Exception as e:
+                    print(f"[KIMI] Judge error: {e}")
+            elif not result:
+                print("[SYS] Gemini failed, trying Kimi fallback (kimi-k3 -> kimi-k2.6)...")
+                try:
+                    kimi_result = _kimi_generate_fallback(data)
+                    if kimi_result:
+                        result = kimi_result
+                        print(f"[SYS] Kimi fallback succeeded: {result.get('action')}")
+                except Exception as e:
+                    print(f"[KIMI] Fallback error: {e}")
             
             # --- שלב האימות הקפדני (Validating the Result) ---
             is_valid_success = False
