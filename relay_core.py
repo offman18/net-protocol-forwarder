@@ -44,17 +44,36 @@ def _call_nvidia(model, messages, max_tokens=800):
         print(f"[KIMI] {model} ERR {e}")
     return None
 
-def _kimi_judge(proposed_text, history_hint=""):
-    """Kimi as judge: receives 30 last msgs hint + proposed, returns edited final_text or None"""
+def _kimi_judge(proposed_text, history_list=None, data_hint=""):
+    """Kimi as judge extensive: 50 last msgs, can edit, link, or reject (SKIP). Returns dict or None"""
     if not NVIDIA_KEY or not proposed_text:
         return None
-    judge_prompt = f"""אתה שופט עורך חדשות בזק. קיבלת הצעה לפרסום:
-"{proposed_text}"
-היסטוריה (30 אחרונות רמז): {history_hint[:1500]}
+    # Build 50 history text
+    hist_text = ""
+    if history_list and isinstance(history_list, list) and len(history_list) > 0:
+        hist_text = "\n".join([f"- {h.get('source_id','')} | {str(h.get('snippet',''))[:60]}" for h in history_list[-50:]])
+    else:
+        hist_text = history_hint[:2000] if isinstance(history_hint, str) else str(data_hint)[:1000]
+    judge_prompt = f"""אתה שופט-על עריכת חדשות. קיבלת 50 הודעות אחרונות וטיוטה חדשה.
 
-משימה: ערוך את ההצעה להיות קריאה, בלי אמרת שפר, בלי פרשנות, בלי "דרמה.".
-אם זה סקר - חובה רשימה אנכית עם • ו-<b> לכותרת.
-החזר אך ורק JSON: {{"final_text":"הטקסט הערוך"}} בלי שום מילה נוספת."""
+היסטוריה (50 אחרונות):
+{hist_text}
+
+טיוטה להצעה:
+"{proposed_text}"
+
+תפקידך עריכה נרחבת:
+- תקן ניסוח להיות אנושי, קריא, קצר (1-2 שורות או רשימת • לסקר)
+- אם הטיוטה קשורה לאחת מ-50 הקודמות - קבע reply_to_source_id ל-ID המתאים, אחרת null
+- אם הטיוטה כפילות, לא חשובה, או לא על בחירות/חדשות -> דחה לגמרי -> החזר {{"action":"SKIP"}}
+- אם צריך שכתוב מלא -> שכתב
+- אם זה סקר -> חובה רשימה אנכית עם • ו-<b>
+
+החזר אך ורק JSON אחד:
+{{"action":"PUBLISH","final_text":"<b>...</b>...","reply_to_source_id":"ID או null","next_scan_minutes":3}}
+או
+{{"action":"SKIP","final_text":"","reply_to_source_id":null,"next_scan_minutes":3}}
+בלי שום מילה מחוץ ל-JSON."""
     for model in KIMI_MODELS:
         content = _call_nvidia(model, [{"role":"user","content": judge_prompt}])
         if content:
@@ -65,7 +84,7 @@ def _kimi_judge(proposed_text, history_hint=""):
                     edited = obj.get('final_text') or obj.get('finalText') or obj.get('text')
                     if edited and len(edited.strip()) > 5:
                         print(f"[KIMI] Judge {model} edited: {edited[:60]}...")
-                        return edited.strip()
+                        return {"action":"PUBLISH","final_text":edited.strip(),"reply_to_source_id":None}
             except Exception as e:
                 print(f"[KIMI] Judge parse fail {model}: {e}")
                 continue
@@ -341,10 +360,27 @@ async def _main():
             # אם Gemini הצליח -> Kimi כשופט עורך (30 הודעות רמז)
             if result and result.get('action') == 'PUBLISH':
                 try:
-                    edited = _kimi_judge(result.get('final_text',''), str(data.get('content',''))[:1000])
-                    if edited:
-                        print(f"[KIMI] Judge edited text applied")
-                        result['final_text'] = edited
+                    hist = data.get('recent_history') or data.get('recentHistory') or []
+                    # Extensive judge returns full dict
+                    judge_result = _kimi_judge(result.get('final_text',''), hist, str(data.get('content',''))[:1000])
+                    if judge_result and isinstance(judge_result, dict) and 'action' in judge_result:
+                        # Judge can reject or edit
+                        if judge_result.get('action') == 'SKIP':
+                            print(f"[KIMI] Judge rejected -> SKIP")
+                            result = judge_result
+                        elif judge_result.get('final_text'):
+                            print(f"[KIMI] Judge extensive edit applied")
+                            result['final_text'] = judge_result['final_text']
+                            if judge_result.get('reply_to_source_id') is not None:
+                                result['reply_to_source_id'] = judge_result['reply_to_source_id']
+                            if judge_result.get('next_scan_minutes'):
+                                result['next_scan_minutes'] = judge_result['next_scan_minutes']
+                    elif isinstance(judge_result, str) and len(judge_result) > 5:
+                        # Fallback old string
+                        print(f"[KIMI] Judge edited text applied (string)")
+                        result['final_text'] = judge_result
+                except Exception as e:
+                    print(f"[KIMI] Judge error: {e}")
                 except Exception as e:
                     print(f"[KIMI] Judge error: {e}")
             elif not result:
