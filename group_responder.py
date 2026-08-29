@@ -173,6 +173,29 @@ def main():
                 if text.startswith("/"): continue
                 print(f"[HUMAN] {from_user.get('first_name')}: {text[:80]}")
                 lower = text.lower()
+                # === קריאה לסוכן בודד - ברור לגמרי ===
+                single = None
+                if any(k in text for k in ["@עורך","עורך ת","תקרא לעורך"]): single="EDITOR"
+                elif any(k in text for k in ["@מבקר","מבקר ת","תקרא למבקר"]): single="CRITIC"
+                elif any(k in text for k in ["@מיקוד","אחראי מיקוד","תקרא למיקוד"]): single="FOCUS"
+                elif any(k in text for k in ["@מהנדס","מהנדס הפרומפט"]): single="PROMPT_ENGINEER"
+                elif "תדברו ביניכם" in text or "שיחה ביניכם" in text:
+                    # סוכנים מדברים ביניהם - סבב 1
+                    history_text = f"דיון קבוצה: {text}"
+                    for name in ["FOCUS","EDITOR","CRITIC"]:
+                        out = run_agent(name, f"שיחה בין סוכנים: הגב לקודמך. הודעת מפעיל: \"{text}\"", history_text)
+                        if out: send_to_group(out); history_text += "\n"+out; time.sleep(1.2)
+                    continue
+                if single:
+                    # קריאה לסוכן אחד בלבד
+                    history_text = f"קריאה ישירה ל-{single}: {text}"
+                    out = run_agent(single, text, history_text)
+                    if out: send_to_group(out)
+                    # גם המבקר מגיב אם זה עורך
+                    if single=="EDITOR" and out:
+                        cr = run_agent("CRITIC", f"טיוטת {single}: {out}", history_text)
+                        if cr: send_to_group(cr)
+                    continue
                 # === שליטה מלאה: הראה/ערוך פרומפט ===
                 if "הראה פרומפט" in text or "הצג פרומפט" in text or "show prompt" in lower:
                     which = "ALL"
