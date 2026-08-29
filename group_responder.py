@@ -292,6 +292,17 @@ def main():
     last_wake = 0
     
     chat_history = []
+    
+    # Pre-populate active draft from Google Apps Script if available
+    if SCANNER_URL:
+        try:
+            r_draft = requests.post(SCANNER_URL, json={"action":"getLastDraft"}, timeout=8)
+            d_json = r_draft.json() if r_draft.headers.get("content-type","").startswith("application/json") else json.loads(r_draft.text)
+            if d_json.get("draft_raw"):
+                chat_history.append(f"[מערכת (טיוטה פעילה)]: {d_json['draft_raw']}")
+                print(f"Loaded active draft on startup: {d_json.get('draft_text', '')[:60]}")
+        except Exception as e:
+            print(f"pre-load draft err: {e}")
 
     while time.time() - start < DURATION:
         try:
@@ -372,7 +383,7 @@ def main():
                     continue
 
                 # === 3. אישור אנושי מפורש לפרסום הטיוטה האחרונה שנחסמה ===
-                if any(k in text for k in ["תפרסם על האירוע", "תפרסם את זה", "לפרסם את הטיוטה", "לפרסם על האירוע", "אשר פרסום"]):
+                if any(k in text for k in ["תפרסם על האירוע", "תפרסם את זה", "לפרסם את הטיוטה", "לפרסם על האירוע", "אשר פרסום", "תפרסם תמיד", "תפרסם"]):
                     # חפש את הטיוטה האחרונה בהיסטוריה
                     last_draft = None
                     for h_msg in reversed(chat_history):
@@ -383,9 +394,22 @@ def main():
                                 last_draft = draft_match.group(1).strip()
                                 last_draft = re.sub(r"(?:🎯|🔍|📊|📎)[\s\S]*", "", last_draft).strip()
                                 break
+                    # אם לא נמצא בהיסטוריה המקומית, שאל ישירות את גוגל סקריפט
+                    if not last_draft and SCANNER_URL:
+                        try:
+                            r_draft = requests.post(SCANNER_URL, json={"action":"getLastDraft"}, timeout=8)
+                            d_json = r_draft.json() if r_draft.headers.get("content-type","").startswith("application/json") else json.loads(r_draft.text)
+                            last_draft = d_json.get("draft_text", "")
+                        except: pass
+
                     if last_draft and len(last_draft) > 15:
-                        send_to_group(f"✍️ העורך הראשי אישר פרסום חריג לפי הוראת המפעיל:\n{last_draft}")
+                        send_to_group(f"✍️ העורך הראשי מפרסם לערוץ באישור המפעיל:\n{last_draft}")
                         publish_to_channel(last_draft, source_id=f"human_override_{int(time.time())}")
+                        continue
+                    else:
+                        send_to_group("🔍 מפעיל סריקה מהירה להבאת חומר גלם עדכני...")
+                        try: requests.get(SCANNER_URL, timeout=10)
+                        except: pass
                         continue
 
                 # === 4. פקודות צפייה ועריכת פרומפט גולמי ===
