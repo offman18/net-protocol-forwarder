@@ -312,17 +312,17 @@ def main():
                 is_bot = from_user.get("is_bot", False)
                 user_name = from_user.get('first_name', 'מפעיל')
                 text = (msg.get("text") or msg.get("caption") or "").strip()
-                if not text or len(text) < 2: 
+                if not text: 
                     continue
 
-                # Record all messages (including bot drafts and agent replies) into chat_history
-                sender_label = "מערכת (טיוטה)" if ("טיוטה לפרסום" in text or text.startswith("📝")) else user_name
+                # Record all messages (bot drafts, agent replies, human chats) into rolling chat_history
+                sender_label = "מערכת (טיוטה)" if ("טיוטה לפרסום" in text or text.startswith("📝")) else (user_name if not is_bot else "בוט מערכת")
                 chat_history.append(f"[{sender_label}]: {text}")
-                if len(chat_history) > 25: chat_history = chat_history[-25:]
+                if len(chat_history) > 30: chat_history = chat_history[-30:]
                 history_str = "\n".join(chat_history)
 
-                # Do not trigger auto-reply to bot messages
-                if is_bot or text.startswith("📝 <b>טיוטה לפרסום</b>") or text.startswith("🎯 עורך ראשי:") or text.startswith("✍️ העורך:") or text.startswith("🔍 המבקר:"):
+                # ONLY skip auto-responding if the message actually came from a bot account
+                if is_bot:
                     continue
 
                 print(f"[HUMAN {user_name}]: {text[:80]}")
