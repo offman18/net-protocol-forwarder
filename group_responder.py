@@ -128,9 +128,9 @@ def run_agent(name, user_content, history_text=""):
     if not p: return None
     msgs = [{"role":"system","content": p["system"]}]
     if history_text:
-        msgs.append({"role":"user","content": "דיון אחרון בחדר המערכת (כולל טיוטות פעילות והודעות שנשלחו):\n" + history_text[-3000:]})
-    msgs.append({"role":"user","content": f"הודעה/בקשה מהמפעיל: {user_content}"})
-    out = _call_nvidia(msgs, max_tokens=600, temperature=0.2)
+        msgs.append({"role":"user","content": "דיון רחב ומלא בחדר המערכת (כולל כל הטיוטות הפעילות, חומרי הגלם, ההערות וההודעות האחרונות):\n" + history_text[-30000:]})
+    msgs.append({"role":"user","content": f"הודעה/בקשה מהמפעיל: {user_content[:5000]}"})
+    out = _call_nvidia(msgs, max_tokens=700, temperature=0.2)
     if out:
         return f"{p['tag']} {out}"
     return None
@@ -323,7 +323,7 @@ def main():
                 # Record all messages (bot drafts, agent replies, human chats) into rolling chat_history
                 sender_label = "מערכת (טיוטה)" if ("טיוטה לפרסום" in text or text.startswith("📝")) else (user_name if not is_bot else "בוט מערכת")
                 chat_history.append(f"[{sender_label}]: {text}")
-                if len(chat_history) > 30: chat_history = chat_history[-30:]
+                if len(chat_history) > 100: chat_history = chat_history[-100:]
                 history_str = "\n".join(chat_history)
 
                 # ONLY skip auto-responding if the message actually came from a bot account
