@@ -80,12 +80,27 @@ def send_to_group(text):
     if not BOT_TOKEN or not GROUP_ID: 
         print("missing BOT_TOKEN/GROUP_ID")
         return False
+    
+    # Ensure correct supergroup prefix -100
+    gid = str(GROUP_ID).strip()
+    if gid.startswith("-") and not gid.startswith("-100") and len(gid) > 8:
+        gid = "-100" + gid[1:]
+    elif not gid.startswith("-") and len(gid) > 8:
+        gid = "-100" + gid
+
     try:
+        # First attempt with HTML formatting
         r = requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            json={"chat_id": GROUP_ID, "text": text, "parse_mode":"HTML", "disable_web_page_preview": True},
+            json={"chat_id": gid, "text": text, "parse_mode":"HTML", "disable_web_page_preview": True},
             timeout=10)
         ok = r.status_code==200 and r.json().get("ok")
-        if not ok: print(f"send fail {r.text[:200]}")
+        if not ok:
+            # Automatic fallback: send as plain text if HTML parsing failed
+            r = requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json={"chat_id": gid, "text": text, "disable_web_page_preview": True},
+                timeout=10)
+            ok = r.status_code==200 and r.json().get("ok")
+            if not ok: print(f"send fail {r.text[:200]}")
         return ok
     except Exception as e:
         print(f"send err {e}")
@@ -149,26 +164,32 @@ def wake_google():
 
 def main():
     print(f"Starting group_responder GROUP={GROUP_ID} bot={BOT_TOKEN[:6]}... models={KIMI_MODELS[0]}...")
+    
+    # Ensure clean polling by removing any active webhooks on this bot token
+    if BOT_TOKEN:
+        try:
+            rw = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook", timeout=8)
+            print(f"Webhook reset status: {rw.status_code}")
+        except Exception as e:
+            print(f"deleteWebhook warning: {e}")
+
     # state
     offset = 0
-    # load offset from file if exists
     try:
         with open("offset.txt","r") as f: offset=int(f.read().strip() or 0)
     except: pass
     start = time.time()
     DURATION = 6*3600  # 6 hours
     last_wake = 0
-    # history buffer for agents (last 50 channel messages not available here, will be passed via wake)
-    # Instead we fetch group history as context
     while time.time() - start < DURATION:
         try:
             # wake google every 90s
             if time.time() - last_wake > 90:
                 wake_google()
                 last_wake = time.time()
-            # poll Telegram
+            # poll Telegram with timeout 15s for efficient long polling
             r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates",
-                params={"offset": offset, "timeout": 1, "limit": 30}, timeout=12)
+                params={"offset": offset, "timeout": 15, "limit": 30}, timeout=25)
             if r.status_code != 200:
                 time.sleep(1.2); continue
             data = r.json()
