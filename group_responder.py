@@ -19,23 +19,23 @@ KIMI_MODELS = [
   "nvidia/nemotron-3-super-120b-a12b",
 ]
 
-# === PERSONAS - סדר ברור, כל הודעה עם תג מי שלח ===
+# === PERSONAS - שמות בעברית, ברור מי כותב, מבינים הקשר ===
 PERSONAS = {
   "FOCUS": {
-    "tag": "[FOCUS 🤖]",
-    "system": "אתה עורך ראשי בחדר מערכת 'חדשות בזק'. תפקידך: ממה להתמקד עכשיו. קבל חומר גלם + היסטוריית ערוץ (50) + דיון קבוצה. החזר JSON: {\"focus_topic\":\"...\",\"reason\":\"...\",\"prompt_patch\":null}. אם רואה תבנית חוזרת בפרומפט - הוסף prompt_patch."
+    "tag": "🎯 אחראי מיקוד",
+    "system": "אתה 'אחראי מיקוד' בחדר מערכת 'חדשות בזק'. אתה מבין עברית מצוין וחושב כמו עורך חדשות. תפקידך להחליט על מה להתמקד. קבל הודעת מפעיל + חומר גלם + היסטוריית ערוץ. ענה בעברית טבעית וקצרה (2-3 שורות), לא JSON. הסבר מה חשוב עכשיו ולמה. אם רואה תבנית חוזרת שצריך לתקן בפרומפט - הוסף בסוף: הצעת פרומפט: ..."
   },
   "EDITOR": {
-    "tag": "[EDITOR ✍️]",
-    "system": "אתה עורך מבזקים אנושי. כתוב ידיעה אחת חדה, טבעית, קצרה (1-2 שורות או רשימת • לסקר). אסור: לפתוח כל פעם ב-'מילה:' או 'קמפיין בחירות:', אסור <i>, אימוג'י רק מדי פעם. חבר ל-thread אם קשור. פלט: טקסט מוכן לפרסום (לא JSON)."
+    "tag": "✍️ העורך",
+    "system": "אתה 'העורך' - כותב מבזקים אנושי. אתה מבין עברית מצוין וכותב כמו אדם שמעדכן חברים, לא כמו רובוט. כתוב ידיעה אחת חדה וטבעית (1-2 שורות או רשימת • לסקר). אסור לפתוח כל פעם ב-'מילה:' או 'קמפיין בחירות:', אסור <i>, אימוג'י רק מדי פעם. חבר ל-thread אם קשור. ענה בעברית טבעית בלבד."
   },
   "CRITIC": {
-    "tag": "[CRITIC 🔍]",
-    "system": "אתה מבקר עריכה מאניש. קבל טיוטה + 50 הודעות אחרונות. בדוק: האם רובוטי? חוזר על תבנית? לא קשור להקשר? אם כן - הצע שכתוב קצר. אם טוב - כתוב 'אושר'. תמיד אנושי, חד."
+    "tag": "🔍 המבקר",
+    "system": "אתה 'המבקר' - מבין עברית מצוין ובודק אם הטיוטה נשמעת אנושית. קבל טיוטה + היסטוריה. בדוק: האם רובוטי? חוזר על תבנית? אם טוב - כתוב 'אושר - נשמע אנושי'. אם צריך תיקון - הצע שכתוב קצר בעברית. תמיד חד וקצר."
   },
   "PROMPT_ENGINEER": {
-    "tag": "[PROMPT-ENGINEER 🛠️]",
-    "system": "אתה מהנדס פרומפט. קבל פרומפט לפני/אחרי + טיוטה + ביקורת. אם צריך לעדכן פרומפט (למשל איסור תבנית) - החזר: PROMPT_PATCH: ... אם לא - החזר: אין שינוי."
+    "tag": "🛠️ מהנדס הפרומפט",
+    "system": "אתה 'מהנדס הפרומפט' - מבין עברית וטכני. קבל פרומפט + טיוטה + ביקורת. אם צריך לעדכן פרומפט (למשל איסור תבנית) - כתוב בעברית: מציע עדכון פרומפט: ... אם לא - כתוב: אין צורך בשינוי."
   }
 }
 
@@ -141,26 +141,26 @@ def main():
                 # simple: use current text + recent history placeholder
                 history_text = f"הודעת מפעיל: {text}\n(קבוצה {GROUP_ID})"
                 # === PERSONA ORDER - ברור מי שולח ===
-                # 1. FOCUS
-                focus = run_agent("FOCUS", f"הודעת מפעיל בקבוצה: \"{text}\" - על מה להתמקד עכשיו? האם צריך לשנות פרומפט?", history_text)
-                if focus: send_to_group(focus); time.sleep(1.2)
-                # 2. EDITOR (מנסח בהתאם להודעת המפעיל)
-                editor = run_agent("EDITOR", f"המפעיל כתב בקבוצה: \"{text}\" - נסח הודעה בהתאם. אם ביקש שינוי - בצע.", history_text + ("\n"+focus if focus else ""))
-                if editor: send_to_group(editor); time.sleep(1.2)
-                # 3. CRITIC
+                # 1. FOCUS - אחראי מיקוד
+                focus = run_agent("FOCUS", f"המפעיל כתב: \"{text}\" - על מה להתמקד? הסבר בעברית.", history_text)
+                if focus: send_to_group(focus); time.sleep(1.3)
+                # 2. EDITOR - העורך
+                editor = run_agent("EDITOR", f"המפעיל כתב: \"{text}\" - נסח הודעה בהתאם בעברית טבעית.", history_text + ("\n"+focus if focus else ""))
+                if editor: send_to_group(editor); time.sleep(1.3)
+                # 3. CRITIC - המבקר
                 if editor:
-                    critic = run_agent("CRITIC", f"טיוטה למבקר: {editor}\nהאם היא אנושית ומגוונת?", history_text)
+                    critic = run_agent("CRITIC", f"טיוטה: {editor}\nבדוק אם אנושי?", history_text)
                     if critic: send_to_group(critic); time.sleep(1.2)
-                # 4. PROMPT_ENGINEER (only if focus suggested patch or human asked)
-                if "פרומפט" in text or "prompt" in text.lower() or (focus and "prompt_patch" in focus.lower()):
-                    pe = run_agent("PROMPT_ENGINEER", f"הודעת מפעיל: {text}\nFOCUS: {focus}\nהאם לעדכן פרומפט?", history_text)
+                # 4. PROMPT_ENGINEER - רק אם צריך
+                if "פרומפט" in text or "prompt" in text.lower() or (focus and "הצעת פרומפט" in focus):
+                    pe = run_agent("PROMPT_ENGINEER", f"המפעיל: {text}\nFOCUS: {focus}\nהאם לעדכן פרומפט?", history_text)
                     if pe: send_to_group(pe)
-                # also handle explicit prompt_patch saving via Google
+                # שמירת הצעת פרומפט
                 try:
-                    if focus and "prompt_patch" in focus:
-                        m=re.search(r'"prompt_patch"\s*:\s*"([^"]+)"', focus)
+                    if focus and "הצעת פרומפט" in focus:
+                        m=re.search(r"הצעת פרומפט:\s*(.+)", focus)
                         if m and len(m.group(1))>10 and SCANNER_URL:
-                            requests.post(SCANNER_URL, json={"action":"setProps","PROMPT_PATCH": m.group(1)}, timeout=8)
+                            requests.post(SCANNER_URL, json={"action":"setProps","PROMPT_PATCH": m.group(1).strip()}, timeout=8)
                 except: pass
 
         except Exception as e:
