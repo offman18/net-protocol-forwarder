@@ -165,19 +165,30 @@ def main():
                 print(f"[HUMAN] {from_user.get('first_name')}: {text[:80]}")
                 lower = text.lower()
                 # === כלים מיידיים ===
-                # 1. פרסום לערוץ: "שלח לערוץ: ...", "פרסם: ...", "publish: ..."
+                # 1. פרסום לערוץ: "שלח לערוץ: ...", "פרסם: ...", "publish: ..." - עובר דרך עורך+מבקר, לא שולח גולמי
                 if any(k in text for k in ["שלח לערוץ", "פרסם", "publish", "שלח הודעה לערוץ"]):
-                    # חלץ טקסט אחרי ":"
-                    to_pub = text.split(":",1)[1].strip() if ":" in text else re.sub(r"שלח לערוץ|פרסם|publish","",text, flags=re.I).strip()
-                    if to_pub and len(to_pub)>3:
-                        # אם ביקש "יש אירוע?" - בדוק חדשות
-                        if "אירוע" in text or "יש חדש" in text:
-                            send_to_group("🔍 בודק אירועים טריים...")
-                            try: requests.get(SCANNER_URL, timeout=10)
-                            except: pass
-                        publish_to_channel(to_pub, source_id=f"manual_{int(time.time())}")
+                    to_pub_raw = text.split(":",1)[1].strip() if ":" in text else re.sub(r"שלח לערוץ|פרסם|publish|שלח הודעה לערוץ","",text, flags=re.I).strip()
+                    if "אירוע" in text or "יש חדש" in text:
+                        send_to_group("🔍 בודק אירועים טריים...")
+                        try: requests.get(SCANNER_URL, timeout=10)
+                        except: pass
+                    if to_pub_raw and len(to_pub_raw)>3:
+                        send_to_group("✍️ מלטש לפני פרסום...")
+                        history_text2 = f"בקשת פרסום מהמפעיל: {to_pub_raw}"
+                        polished = run_agent("EDITOR", f"לטש והפוך למבזק מוכן לפרסום בעברית טבעית (בלי 'מילה:' קבוע): \"{to_pub_raw}\"", history_text2)
+                        if polished:
+                            # הסר תג
+                            polished_text = re.sub(r"^\[.*?\]|✍️ העורך|🎯.*?|🔍.*?\n", "", polished).strip()
+                            polished_text = polished_text[:1000]
+                            # ביקורת מהירה
+                            critic2 = run_agent("CRITIC", f"טיוטה מלוטשת: {polished_text}\nאשר או הצע תיקון קצר", history_text2)
+                            if critic2 and "אושר" not in critic2:
+                                send_to_group(critic2)
+                            publish_to_channel(polished_text, source_id=f"manual_{int(time.time())}")
+                        else:
+                            publish_to_channel(to_pub_raw, source_id=f"manual_{int(time.time())}")
                     else:
-                        send_to_group("❓ כתוב: שלח לערוץ: [טקסט]")
+                        send_to_group("❓ כתוב: שלח לערוץ: [הטקסט שלך] — אני אלטש ואפרסם")
                     continue
                 # 2. עדכון פרומפט פר-סוכן: "תעדכן פרומפט של העורך/מבקר/מיקוד/הכל: ..."
                 patch_match = re.search(r"עדכן.*?פרומפט.*?של\s*(העורך|המבקר|מיקוד|הכל|העורך הראשי|מהנדס)?\s*[:：]\s*(.+)", text, re.I)
