@@ -171,18 +171,59 @@ def main():
                 if text.startswith("/"): continue
                 print(f"[HUMAN] {from_user.get('first_name')}: {text[:80]}")
                 lower = text.lower()
-                # === כלים מיידיים ===
-                # 0. סריקה יזומה: "תסרוק", "סרוק", "תפרסם חדשות"
-                if any(k in text for k in ["תסרוק", "סרוק", "תפרסם חדשות", "פרסם חדשות"]):
-                    send_to_group("🔍 כלי wake_scanner: סורק 50 מקורות...")
-                    try:
-                        r = requests.get(SCANNER_URL, timeout=12)
-                        send_to_group(f"✅ סריקה הוערה ({r.status_code}), טיוטה תגיע לקבוצה תוך דקה")
-                    except Exception as e:
-                        send_to_group(f"❌ שגיאת סריקה: {e}")
-                    continue
-                # 1. פרסום לערוץ: "שלח לערוץ XX" גם בלי נקודותיים - עובר דרך עורך+מבקר
-                if any(k in text for k in ["שלח לערוץ", "פרסם", "publish", "שלח הודעה לערוץ"]):
+                # === החלטת AI איזה כלי להפעיל ===
+                router = run_agent("FOCUS", f"המפעיל כתב בקבוצה: \"{text}\"\nהחלט איזה כלי להפעיל: wake_scanner / publish_to_channel / save_prompt_patch / none. ענה בשורה אחת: כלי: [שם] + הסבר קצר.", f"כלים זמינים: wake_scanner (סרוק חדשות), publish_to_channel (פרסם לערוץ), save_prompt_patch (עדכן פרומפט), none (רק דיון)")
+                # אם ה-AI החליט על כלי - בצע, אם לא - המשך לדיון רגיל
+                chosen = ""
+                if router:
+                    if "wake_scanner" in router.lower():
+                        chosen = "wake_scanner"
+                        send_to_group(router)
+                        send_to_group("🔍 כלי wake_scanner: סורק 50 מקורות...")
+                        try:
+                            r = requests.get(SCANNER_URL, timeout=12)
+                            send_to_group(f"✅ סריקה הוערה, טיוטה תגיע תוך דקה")
+                        except Exception as e:
+                            send_to_group(f"❌ שגיאת סריקה: {e}")
+                        continue
+                    elif "publish_to_channel" in router.lower():
+                        chosen = "publish"
+                        # חלץ טקסט לפרסום באמצעות AI
+                        m = re.search(r"(?:שלח לערוץ|פרסם|publish)\s*[:：]?\s*(.*)", text, re.I)
+                        to_pub_raw = m.group(1).strip() if m and m.group(1) else text
+                        # אם ה-router החליט publish אבל אין טקסט ברור - בקש מהעורך לנסח
+                        if len(to_pub_raw) < 10:
+                            to_pub_raw = text
+                        send_to_group(router)
+                        send_to_group("✍️ כלי polish: מלטש לפני פרסום...")
+                        polished = run_agent("EDITOR", f"לטש והפוך למבזק מוכן לפרסום: \"{to_pub_raw}\"", f"בקשת מפעיל: {text}")
+                        if polished:
+                            polished_text = re.sub(r"^.*?:\s*", "", polished, count=1).strip()[:1100]
+                            if "לא הבנתי" in polished_text:
+                                send_to_group(polished)
+                                continue
+                            critic2 = run_agent("CRITIC", f"טיוטה: {polished_text}", "")
+                            if critic2: send_to_group(critic2)
+                            publish_to_channel(polished_text, source_id=f"manual_{int(time.time())}")
+                        continue
+                    elif "save_prompt_patch" in router.lower():
+                        chosen = "patch"
+                        # חלץ פרומפט להצלה
+                        # יטופל בהמשך בבלוק הפאץ'
+                        pass
+                    else:
+                        # none - המשך לדיון רגיל, שלח את החלטת ה-router כ-FOCUS
+                        send_to_group(router)
+                # אם ה-router בחר patch - טפל
+                if chosen == "patch":
+                    # המשך לבלוק עדכון פרומפט למטה
+                    pass
+                elif router and "none" not in router.lower() and chosen == "":
+                    # router החליט על דיון רגיל - כבר שלחנו, המשך ל-EDITOR/CRITIC
+                    pass
+                # אם הגענו לכאן בלי continue - זה דיון רגיל
+                # 1. פרסום לערוץ fallback אם ה-AI פספס ויש מילת מפתח
+                if chosen == "" and any(k in text for k in ["שלח לערוץ", "שלח הודעה לערוץ"]) and "publish_to_channel" not in (router or ""):
                     # חילוץ גם בלי נקודותיים: "שלח לערוץ עדכון נו כב" -> "עדכון נו כב"
                     m = re.search(r"(?:שלח לערוץ|פרסם|publish|שלח הודעה לערוץ)\s*[:：]?\s*(.*)", text, re.I)
                     to_pub_raw = m.group(1).strip() if m else ""
