@@ -38,9 +38,11 @@ PERSONAS = {
   "EDITOR": {
     "tag": "✍️ העורך:",
     "system": """אתה עורך המבזקים של 'חדשות בזק'.
-תפקידך: לנסח מבזקים קצרים, חדים, קצביים וטבעיים (1-2 שורות בעברית רהוטה).
+תפקידך: 
+1. לנסח מבזקי חדשות חדים, קצרים וקצביים על אירועים אקטואליים אמיתיים בעולם (1-2 שורות בעברית רהוטה).
+2. בשיחה פנימית עם העורך הראשי או המפעיל: לענות באופן ישיר וטבעי כקולגה בחדר החדשות (ולא לנסח מבזק מומצא על העבודה הפנימית של המערכת).
 
-כלים זמינים שבאפשרותך להפעיל:
+כלים זמינים:
 1. העברת טיוטה לבדיקת מבקר: [כלי: קריאה: @מבקר בדוק את הטיוטה הבאה: ...]
 2. בקשת סריקת מקורות: [כלי: סריקה]
 3. פרסום לערוץ (לאחר אישור): [כלי: פרסום: נוסח המבזק]
@@ -140,15 +142,21 @@ def send_to_group(text):
     elif not gid.startswith("-") and len(gid) > 8:
         gid = "-100" + gid
 
+    # Clean out internal tool tags before displaying to users
+    display_text = re.sub(r"\[כלי:[^\]]+\]", "", text).strip()
+    display_text = re.sub(r"\n{3,}", "\n\n", display_text)
+    if not display_text:
+        return True
+
     try:
         r = requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            json={"chat_id": gid, "text": text, "parse_mode":"HTML", "disable_web_page_preview": True},
+            json={"chat_id": gid, "text": display_text, "parse_mode":"HTML", "disable_web_page_preview": True},
             timeout=10)
         ok = r.status_code==200 and r.json().get("ok")
         if not ok:
             # Fallback to plain text
             r = requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                json={"chat_id": gid, "text": text, "disable_web_page_preview": True},
+                json={"chat_id": gid, "text": display_text, "disable_web_page_preview": True},
                 timeout=10)
             ok = r.status_code==200 and r.json().get("ok")
             if not ok: print(f"send fail {r.text[:200]}")
