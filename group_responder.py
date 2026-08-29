@@ -173,6 +173,42 @@ def main():
                 if text.startswith("/"): continue
                 print(f"[HUMAN] {from_user.get('first_name')}: {text[:80]}")
                 lower = text.lower()
+                # === שליטה מלאה: הראה/ערוך פרומפט ===
+                if "הראה פרומפט" in text or "הצג פרומפט" in text or "show prompt" in lower:
+                    which = "ALL"
+                    if "עורך" in text: which="EDITOR"
+                    elif "מבקר" in text: which="CRITIC"
+                    elif "מיקוד" in text: which="FOCUS"
+                    elif "ראשי" in text or "main" in lower: which="MAIN"
+                    try:
+                        r = requests.post(SCANNER_URL, json={"action":"getPrompt","which":which}, timeout=12)
+                        j = r.json() if r.headers.get("content-type","").startswith("application/json") else json.loads(r.text)
+                        # send each prompt truncated
+                        for k,v in j.items():
+                            if k=="PATCHES": continue
+                            send_to_group(f"📄 פרומפט {k}:\n{v[:3500]}")
+                            time.sleep(0.8)
+                        if j.get("PATCHES"):
+                            send_to_group(f"🩹 פאצ'ים: {json.dumps(j['PATCHES'], ensure_ascii=False)[:1000]}")
+                    except Exception as e:
+                        send_to_group(f"❌ שגיאת הראה פרומפט: {e}")
+                    continue
+                if ("ערוך פרומפט" in text or "קבע פרומפט" in text or "set prompt" in lower) and ":" in text:
+                    which = "ALL"
+                    if "עורך" in text: which="EDITOR"
+                    elif "מבקר" in text: which="CRITIC"
+                    elif "מיקוד" in text: which="FOCUS"
+                    elif "ראשי" in text or "main" in lower: which="MAIN"
+                    new_text = text.split(":",1)[1].strip()
+                    if len(new_text) < 10:
+                        send_to_group("❓ כתוב: ערוך פרומפט של העורך: [טקסט מלא חדש]")
+                        continue
+                    try:
+                        r = requests.post(SCANNER_URL, json={"action":"setPrompt","which":which,"text":new_text}, timeout=12)
+                        send_to_group(f"✅ פרומפט {which} עודכן ({len(new_text)} תווים): {r.text[:200]}")
+                    except Exception as e:
+                        send_to_group(f"❌ שגיאת ערוך פרומפט: {e}")
+                    continue
                 # === החלטת AI איזה כלי להפעיל ===
                 router = run_agent("FOCUS", f"המפעיל כתב בקבוצה: \"{text}\"\nהחלט איזה כלי להפעיל: wake_scanner / publish_to_channel / save_prompt_patch / none. ענה בשורה אחת: כלי: [שם] + הסבר קצר.", f"כלים זמינים: wake_scanner (סרוק חדשות), publish_to_channel (פרסם לערוץ), save_prompt_patch (עדכן פרומפט), none (רק דיון)")
                 # אם ה-AI החליט על כלי - בצע, אם לא - המשך לדיון רגיל
