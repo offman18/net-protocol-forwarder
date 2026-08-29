@@ -7,16 +7,11 @@ NVIDIA_KEY = os.environ.get("NVIDIA_API_KEY","").strip()
 SCANNER_URL = os.environ.get("SCANNER_URL","").strip()
 SYNC_ENDPOINT = os.environ.get("SYNC_ENDPOINT","").strip()
 
-# Fallback chain for LLM calls
+# Fallback chain for LLM calls (NVIDIA NIM endpoint only)
 KIMI_MODELS = [
-  "moonshotai/kimi-k3",
-  "minimaxai/minimax-m3",
   "nvidia/nemotron-3-ultra-550b-a55b",
-  "deepseek-ai/deepseek-v4-pro-0813",
-  "deepseek-ai/deepseek-v4-flash-0731",
-  "openai/gpt-oss-20b",
-  "nvidia/nemotron-3-nano-30b-a3b",
   "nvidia/nemotron-3-super-120b-a12b",
+  "nvidia/nemotron-3-nano-30b-a3b",
 ]
 
 # === PERSONAS - צוות מערכת חדשות עם גישה מלאה לכלים ===
@@ -217,16 +212,26 @@ def wake_google():
         except Exception as e:
             if "timeout" not in str(e).lower(): print(f"wake err {e}")
 
+_last_sync_time = 0
+
 def sync_context_to_scanner(history_str):
+    global _last_sync_time
     if not SCANNER_URL: return
+    now = time.time()
+    if now - _last_sync_time < 30:  # Debounce: sync at most every 30 seconds
+        return
+    _last_sync_time = now
     try:
-        requests.post(SCANNER_URL, json={"action": "syncGroupContext", "context": history_str[-25000:]}, timeout=6)
+        requests.post(SCANNER_URL, json={"action": "syncGroupContext", "context": history_str[-9000:]}, timeout=6)
     except Exception as e:
         print(f"syncGroupContext err: {e}")
 
-def execute_agent_tools(agent_name, agent_output, history_str):
+def execute_agent_tools(agent_name, agent_output, history_str, depth=0):
     """Parses and executes any autonomous tools requested by the agent."""
     if not agent_output: return
+    if depth > 2:
+        print(f"[{agent_name}] Max tool delegation depth reached, stopping.")
+        return
     
     # 1. Check for scan tool [כלי: סריקה]
     if "[כלי: סריקה]" in agent_output:
@@ -269,7 +274,7 @@ def execute_agent_tools(agent_name, agent_output, history_str):
             sub_resp = run_agent(target_persona, task, history_str + "\n" + agent_output)
             if sub_resp:
                 send_to_group(sub_resp)
-                execute_agent_tools(target_persona, sub_resp, history_str + "\n" + agent_output)
+                execute_agent_tools(target_persona, sub_resp, history_str + "\n" + agent_output, depth=depth+1)
 
 def main():
     print(f"Starting group_responder GROUP={GROUP_ID} bot={BOT_TOKEN[:6]}...")
@@ -338,7 +343,7 @@ def main():
                 chat_id_str = str(chat.get("id", ""))
                 c_num = chat_id_str.replace("-100", "").replace("-", "")
                 g_num = str(GROUP_ID).replace("-100", "").replace("-", "")
-                if c_num != g_num and c_num not in ["3951660065", "5469136458"]:
+                if c_num != g_num:
                     continue
 
                 from_user = msg.get("from", {})
