@@ -121,8 +121,8 @@ def run_agent(name, user_content, history_text=""):
     if not p: return None
     msgs = [{"role":"system","content": p["system"]}]
     if history_text:
-        msgs.append({"role":"user","content": "הקשר שיחה אחרון:\n"+history_text[:2500]})
-    msgs.append({"role":"user","content": user_content[:2500]})
+        msgs.append({"role":"user","content": "דיון אחרון בחדר המערכת (כולל טיוטות פעילות והודעות שנשלחו):\n" + history_text[-3000:]})
+    msgs.append({"role":"user","content": f"הודעה/בקשה מהמפעיל: {user_content}"})
     out = _call_nvidia(msgs, max_tokens=600, temperature=0.2)
     if out:
         return f"{p['tag']} {out}"
@@ -301,22 +301,23 @@ def main():
                     continue
 
                 from_user = msg.get("from", {})
-                if from_user.get("is_bot"): 
-                    continue
-
+                is_bot = from_user.get("is_bot", False)
+                user_name = from_user.get('first_name', 'מפעיל')
                 text = (msg.get("text") or msg.get("caption") or "").strip()
                 if not text or len(text) < 2: 
                     continue
 
-                # Ignore automated broadcast templates
-                if text.startswith("📝 <b>טיוטה לפרסום</b>") or text.startswith("🎯 עורך ראשי:") or text.startswith("✍️ העורך:"):
+                # Record all messages (including bot drafts and agent replies) into chat_history
+                sender_label = "מערכת (טיוטה)" if ("טיוטה לפרסום" in text or text.startswith("📝")) else user_name
+                chat_history.append(f"[{sender_label}]: {text}")
+                if len(chat_history) > 25: chat_history = chat_history[-25:]
+                history_str = "\n".join(chat_history)
+
+                # Do not trigger auto-reply to bot messages
+                if is_bot or text.startswith("📝 <b>טיוטה לפרסום</b>") or text.startswith("🎯 עורך ראשי:") or text.startswith("✍️ העורך:") or text.startswith("🔍 המבקר:"):
                     continue
 
-                user_name = from_user.get('first_name', 'מפעיל')
                 print(f"[HUMAN {user_name}]: {text[:80]}")
-                chat_history.append(f"{user_name}: {text}")
-                if len(chat_history) > 20: chat_history = chat_history[-20:]
-                history_str = "\n".join(chat_history)
                 lower = text.lower()
 
                 # === 1. פקודת סריקה יזומה מהמפעיל ===
