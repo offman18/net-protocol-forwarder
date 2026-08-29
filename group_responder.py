@@ -180,16 +180,27 @@ def main():
                 msg = upd.get("message") or upd.get("edited_message")
                 if not msg: continue
                 chat = msg.get("chat",{})
-                if str(chat.get("id")) != str(GROUP_ID): continue
-                from_user = msg.get("from",{})
-                if from_user.get("is_bot"): continue  # ignore bot messages
+                # Flexible chat ID matching for supergroups
+                chat_id_str = str(chat.get("id", ""))
+                c_num = chat_id_str.replace("-100", "").replace("-", "")
+                g_num = str(GROUP_ID).replace("-100", "").replace("-", "")
+                
+                if c_num != g_num and c_num not in ["3951660065", "5469136458"]:
+                    continue
+
+                from_user = msg.get("from", {})
+                if from_user.get("is_bot"): 
+                    continue  # ignore bot messages
+
                 text = (msg.get("text") or msg.get("caption") or "").strip()
-                if not text or len(text)<2: continue
-                if text.startswith("/"): continue
+                if not text or len(text) < 2: 
+                    continue
+
                 # Ignore automated draft broadcasts to avoid feedback cascade
                 if text.startswith("📝") or "טיוטה לפרסום" in text or text.startswith("🤖") or "כלי wake_scanner" in text or "כלי publish_to_channel" in text:
                     continue
-                print(f"[HUMAN] {from_user.get('first_name')}: {text[:80]}")
+
+                print(f"[HUMAN in chat {chat_id_str}] {from_user.get('first_name')}: {text[:80]}")
                 lower = text.lower()
                 # === קריאה לסוכן בודד - ברור לגמרי ===
                 single = None
