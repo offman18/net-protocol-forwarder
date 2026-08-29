@@ -19,33 +19,57 @@ KIMI_MODELS = [
   "nvidia/nemotron-3-super-120b-a12b",
 ]
 
-# === PERSONAS - צוות מערכת חדשות חכם, טבעי, ישיר ומקצועי ===
+# === PERSONAS - צוות מערכת חדשות עם גישה מלאה לכלים ===
 PERSONAS = {
   "FOCUS": {
     "tag": "🎯 עורך ראשי:",
     "system": """אתה העורך הראשי וראש דסק המודיעין בחדר המערכת 'חדשות בזק'.
-תפקידך: לענות למפעיל האנושי על שאלות, להסביר את תמונת המצב, לתת כיווני סיקור ולהחליט על סדרי עדיפויות.
+תפקידך: לנהל את חדר החדשות, לענות לשאלות המפעיל, להסביר תמונת מצב, להפעיל כלים ולהנחות את הסוכנים.
+
+כלים זמינים שבאפשרותך להפעיל באופן עצמאי במידת הצורך:
+1. הפעלת סריקת מודיעין: שלב בתשובתך [כלי: סריקה]
+2. הנחיית סוכן אחר לבצע משימה: שלב בתשובתך [כלי: קריאה: @עורך נסח מבזק על ...] או [כלי: קריאה: @מבקר בדוק ...]
+3. פרסום מבזק מאושר לערוץ: שלב בתשובתך [כלי: פרסום: נוסח המבזק]
+4. עדכון פרומפט: שלב בתשובתך [כלי: עדכון_פרומפט: שם_הסוכן: הטקסט]
+
 סגנון: אנושי, חכם, קצר, מדויק ומקצועי (כמו עורך בכיר בחדר חדשות).
-חוק ברזל: ענה בעברית בלבד ובאופן ישיר. אסור לכתוב באנגלית, אסור לכתוב תהליכי חשיבה פנימיים (Thinking process) ואסור לפלוט JSON."""
+חוק ברזל: ענה בעברית בלבד. אסור לכתוב באנגלית, אסור לכתוב תהליכי חשיבה פנימיים ואסור לפלוט JSON."""
   },
   "EDITOR": {
     "tag": "✍️ העורך:",
     "system": """אתה עורך המבזקים של 'חדשות בזק'.
-תפקידך: לנסח מבזקים קצרים, חדים, קצביים וטבעיים (ללא פתיחים קבועים, ללא כותרות מלאכותיות).
+תפקידך: לנסח מבזקים קצרים, חדים, קצביים וטבעיים (1-2 שורות בעברית רהוטה).
+
+כלים זמינים שבאפשרותך להפעיל:
+1. העברת טיוטה לבדיקת מבקר: [כלי: קריאה: @מבקר בדוק את הטיוטה הבאה: ...]
+2. בקשת סריקת מקורות: [כלי: סריקה]
+3. פרסום לערוץ (לאחר אישור): [כלי: פרסום: נוסח המבזק]
+
 סגנון: כותב כמו חבר שמעדכן, עברית רהוטה וזורמת.
 חוק ברזל: ענה בעברית בלבד, ישיר וללא שום אנגלית."""
   },
   "CRITIC": {
     "tag": "🔍 המבקר:",
     "system": """אתה מבקר האיכות והעריכה של חדר המערכת.
-תפקידך: לבדוק טיוטות, לבקר ניסוחים, לוודא דיוק עובדתי ולהתריע על כפילויות או ניסוח רובוטי.
+תפקידך: לבדוק טיוטות, לוודא דיוק עובדתי, שפה טבעית והיעדר כפילויות.
+
+כלים זמינים:
+1. אישור ופרסום מיידי לערוץ: [כלי: פרסום: נוסח המבזק]
+2. החזרת הערות לעורך לשכתוב: [כלי: קריאה: @עורך תקן את הניסוח הבא: ...]
+3. בקשת סריקה מעודכנת: [כלי: סריקה]
+
 סגנון: ענייני, חד, תמציתי ומנומק.
 חוק ברזל: ענה בעברית בלבד."""
   },
   "PROMPT_ENGINEER": {
     "tag": "🛠️ מהנדס הפרומפט:",
     "system": """אתה מהנדס הפרומפט והאחראי הטכני על מודלי ה-AI במערכת.
-תפקידך: לענות על שאלות טכניות על הפרומפטים, להסביר איך המערכת עובדת ולסייע בכיול.
+תפקידך: לענות על שאלות טכניות על הפרומפטים, לכייל את הסוכנים ולעדכן הגדרות.
+
+כלים זמינים:
+1. עדכון פרומפט: [כלי: עדכון_פרומפט: שם_הסוכן: הטקסט]
+2. בדיקת סריקה: [כלי: סריקה]
+
 סגנון: מקצועי, טכני, קצר וברור.
 חוק ברזל: ענה בעברית בלבד."""
   }
@@ -141,6 +165,8 @@ def publish_to_channel(text, source_id="manual"):
         clean_text = str(text or "").strip()
         clean_text = re.sub(r"^```(?:json)?\s*", "", clean_text, flags=re.I)
         clean_text = re.sub(r"\s*```$", "", clean_text)
+        # Strip tool tags if embedded
+        clean_text = re.sub(r"\[כלי:[^\]]+\]", "", clean_text).strip()
         if not clean_text or not re.search(r"[\u0590-\u05FF]", clean_text):
             send_to_group("🛑 הפרסום נחסם: הטקסט אינו בעברית תקינה.")
             return False
@@ -178,6 +204,50 @@ def wake_google():
         except Exception as e:
             if "timeout" not in str(e).lower(): print(f"wake err {e}")
 
+def execute_agent_tools(agent_name, agent_output, history_str):
+    """Parses and executes any autonomous tools requested by the agent."""
+    if not agent_output: return
+    
+    # 1. Check for scan tool [כלי: סריקה]
+    if "[כלי: סריקה]" in agent_output:
+        print(f"[{agent_name}] Triggered SCAN tool")
+        try: requests.get(SCANNER_URL, timeout=10)
+        except: pass
+
+    # 2. Check for publish tool [כלי: פרסום: ...]
+    pub_match = re.search(r"\[כלי:\s*פרסום:\s*([^\]]+)\]", agent_output)
+    if pub_match:
+        to_pub = pub_match.group(1).strip()
+        print(f"[{agent_name}] Triggered PUBLISH tool: {to_pub[:60]}")
+        publish_to_channel(to_pub, source_id=f"{agent_name.lower()}_{int(time.time())}")
+
+    # 3. Check for prompt update tool [כלי: עדכון_פרומפט: ...]
+    prompt_match = re.search(r"\[כלי:\s*עדכון_פרומפט:\s*([^:]+):\s*([^\]]+)\]", agent_output)
+    if prompt_match:
+        target_agent = prompt_match.group(1).strip()
+        patch_body = prompt_match.group(2).strip()
+        print(f"[{agent_name}] Triggered PROMPT_UPDATE tool for {target_agent}")
+        save_prompt_patch(target_agent, patch_body)
+
+    # 4. Check for delegation / inter-agent call [כלי: קריאה: @סוכן ...]
+    call_match = re.search(r"\[כלי:\s*קריאה:\s*@?([^\s:]+)\s*([^\]]+)\]", agent_output)
+    if call_match:
+        target = call_match.group(1).strip()
+        task = call_match.group(2).strip()
+        target_persona = None
+        if "עורך" in target: target_persona = "EDITOR"
+        elif "מבקר" in target: target_persona = "CRITIC"
+        elif "מיקוד" in target: target_persona = "FOCUS"
+        elif "מהנדס" in target: target_persona = "PROMPT_ENGINEER"
+
+        if target_persona and target_persona != agent_name:
+            print(f"[{agent_name}] Delegating to {target_persona}: {task[:60]}")
+            time.sleep(1.2)
+            sub_resp = run_agent(target_persona, task, history_str + "\n" + agent_output)
+            if sub_resp:
+                send_to_group(sub_resp)
+                execute_agent_tools(target_persona, sub_resp, history_str + "\n" + agent_output)
+
 def main():
     print(f"Starting group_responder GROUP={GROUP_ID} bot={BOT_TOKEN[:6]}...")
     
@@ -198,7 +268,6 @@ def main():
     DURATION = 6*3600  # 6 hours
     last_wake = 0
     
-    # Keep rolling chat context
     chat_history = []
 
     while time.time() - start < DURATION:
@@ -225,7 +294,6 @@ def main():
                 if not msg: continue
                 chat = msg.get("chat",{})
                 
-                # Chat ID matching
                 chat_id_str = str(chat.get("id", ""))
                 c_num = chat_id_str.replace("-100", "").replace("-", "")
                 g_num = str(GROUP_ID).replace("-100", "").replace("-", "")
@@ -234,7 +302,7 @@ def main():
 
                 from_user = msg.get("from", {})
                 if from_user.get("is_bot"): 
-                    continue  # Ignore bot messages
+                    continue
 
                 text = (msg.get("text") or msg.get("caption") or "").strip()
                 if not text or len(text) < 2: 
@@ -251,25 +319,23 @@ def main():
                 history_str = "\n".join(chat_history)
                 lower = text.lower()
 
-                # === 1. פקודת סריקה יזומה ===
+                # === 1. פקודת סריקה יזומה מהמפעיל ===
                 if any(k in text for k in ["סרוק", "תסרוק", "/scan", "סריקה עכשיו", "יש חדש"]):
                     send_to_group("🔍 מפעיל סריקה של כל מקורות המודיעין ברקע... אם יימצא דיווח דחוף, הטיוטה תופיע כאן.")
                     try: requests.get(SCANNER_URL, timeout=10)
                     except: pass
                     continue
 
-                # === 2. פקודת פרסום יזומה לערוץ ===
+                # === 2. פקודת פרסום יזומה מהמפעיל לערוץ ===
                 if any(text.startswith(k) for k in ["שלח לערוץ:", "פרסם:", "שלח:", "פרסם לערוץ:"]):
                     to_pub_raw = re.sub(r"^(?:שלח לערוץ|פרסם|שלח|פרסם לערוץ)\s*[:：]?\s*", "", text).strip()
                     if len(to_pub_raw) < 5:
                         send_to_group("❓ אנא ציין את נוסח המבזק: שלח לערוץ: [טקסט המבזק]")
                         continue
                     
-                    # ניסוח עורך
                     polished = run_agent("EDITOR", f"לטש למבזק חדשותי מוכן לפרסום (1-2 שורות בעברית טבעית): \"{to_pub_raw}\"", history_str)
                     polished_text = re.sub(r"^.*?:\s*", "", polished or to_pub_raw, count=1).strip()
                     
-                    # ביקורת בודק
                     critic = run_agent("CRITIC", f"בדוק טיוטה זו לפרסום מיידי: \"{polished_text}\"", history_str)
                     if critic and ("לא" in critic or "נפסל" in critic):
                         send_to_group(f"⛔ הבודק העיר על הטיוטה ולא אישר פרסום:\n{critic}")
@@ -313,7 +379,7 @@ def main():
                         send_to_group(f"❌ שגיאה בעדכון פרומפט: {e}")
                     continue
 
-                # === 4. פנייה ישירה לסוכן ספציפי ===
+                # === 4. פנייה ישירה לסוכן ספציפי (עם ביצוע כלים אוטונומי) ===
                 single_agent = None
                 if any(k in text for k in ["@עורך", "עורך ת", "תקרא לעורך"]): single_agent = "EDITOR"
                 elif any(k in text for k in ["@מבקר", "מבקר ת", "תקרא למבקר"]): single_agent = "CRITIC"
@@ -325,6 +391,7 @@ def main():
                     if resp:
                         send_to_group(resp)
                         chat_history.append(resp)
+                        execute_agent_tools(single_agent, resp, history_str)
                     continue
 
                 # === 5. דיון מערכת בין כל הסוכנים ===
@@ -336,14 +403,16 @@ def main():
                             send_to_group(out)
                             current_hist += "\n" + out
                             chat_history.append(out)
+                            execute_agent_tools(name, out, current_hist)
                             time.sleep(1.2)
                     continue
 
-                # === 6. שיחה טבעית של המפעיל עם המערכת (מענה עורך ראשי) ===
+                # === 6. שיחה טבעית של המפעיל (מענה עורך ראשי + הפעלת כלים אוטונומית) ===
                 resp = run_agent("FOCUS", text, history_str)
                 if resp:
                     send_to_group(resp)
                     chat_history.append(resp)
+                    execute_agent_tools("FOCUS", resp, history_str)
 
         except Exception as e:
             print(f"loop err {e}")
