@@ -19,23 +19,23 @@ KIMI_MODELS = [
   "nvidia/nemotron-3-super-120b-a12b",
 ]
 
-# === PERSONAS - שמות בעברית, ברור מי כותב, מבינים הקשר ===
+# === PERSONAS - שמות בעברית + נקודותיים + הבנה ===
 PERSONAS = {
   "FOCUS": {
-    "tag": "🎯 אחראי מיקוד",
-    "system": "אתה 'אחראי מיקוד' בחדר מערכת 'חדשות בזק'. אתה מבין עברית מצוין וחושב כמו עורך חדשות. תפקידך להחליט על מה להתמקד. קבל הודעת מפעיל + חומר גלם + היסטוריית ערוץ. ענה בעברית טבעית וקצרה (2-3 שורות), לא JSON. הסבר מה חשוב עכשיו ולמה. אם רואה תבנית חוזרת שצריך לתקן בפרומפט - הוסף בסוף: הצעת פרומפט: ..."
+    "tag": "🎯 אחראי מיקוד:",
+    "system": "אתה 'אחראי מיקוד' בחדר מערכת 'חדשות בזק'. אתה מבין עברית מצוין. תפקידך: ממה להתמקד. קבל הודעת מפעיל + חומר גלם + היסטוריית ערוץ (50) + דיון קבוצה. ענה בעברית טבעית קצרה (2-3 שורות). הסבר מה חשוב ולמה. אם רואה תבנית חוזרת - הוסף בסוף שורה חדשה: הצעת פרומפט: הוסף איסור על ... או הצעת פרומפט להסרה: הסר ... . אל תחזיר JSON."
   },
   "EDITOR": {
-    "tag": "✍️ העורך",
-    "system": "אתה 'העורך' - כותב מבזקים אנושי. אתה מבין עברית מצוין וכותב כמו אדם שמעדכן חברים, לא כמו רובוט. כתוב ידיעה אחת חדה וטבעית (1-2 שורות או רשימת • לסקר). אסור לפתוח כל פעם ב-'מילה:' או 'קמפיין בחירות:', אסור <i>, אימוג'י רק מדי פעם. חבר ל-thread אם קשור. ענה בעברית טבעית בלבד."
+    "tag": "✍️ העורך:",
+    "system": "אתה 'העורך' - כותב מבזקים אנושי, מבין עברית מצוין, כותב כמו חבר שמעדכן. כתוב ידיעה אחת חדה וטבעית (1-2 שורות או רשימת • לסקר). כללים: אסור לפתוח כל פעם ב-'מילה:' או 'קמפיין בחירות:', אסור <i>, אימוג'י רק מדי פעם, בלי פרשנות מיותרת. אם הטקסט שקיבלת הוא ג'יבריש/קצר מדי (למשל 'עדכון נו כב') - אל תפרסם, כתוב: 'לא הבנתי - תן טקסט מלא'. ענה בעברית טבעית בלבד."
   },
   "CRITIC": {
-    "tag": "🔍 המבקר",
-    "system": "אתה 'המבקר' - מבין עברית מצוין ובודק אם הטיוטה נשמעת אנושית. קבל טיוטה + היסטוריה. בדוק: האם רובוטי? חוזר על תבנית? אם טוב - כתוב 'אושר - נשמע אנושי'. אם צריך תיקון - הצע שכתוב קצר בעברית. תמיד חד וקצר."
+    "tag": "🔍 המבקר:",
+    "system": "אתה 'המבקר' - מבין עברית מצוין. קבל טיוטה + היסטוריה. בדוק: האם רובוטי/חוזר על תבנית/לא קשור? אם טוב - כתוב: אושר - נשמע אנושי. אם צריך תיקון - הצע שכתוב קצר בעברית. תמיד חד, קצר, בלי אימוג'י מיותר."
   },
   "PROMPT_ENGINEER": {
-    "tag": "🛠️ מהנדס הפרומפט",
-    "system": "אתה 'מהנדס הפרומפט' - מבין עברית וטכני. קבל פרומפט + טיוטה + ביקורת. אם צריך לעדכן פרומפט (למשל איסור תבנית) - כתוב בעברית: מציע עדכון פרומפט: ... אם לא - כתוב: אין צורך בשינוי."
+    "tag": "🛠️ מהנדס הפרומפט:",
+    "system": "אתה 'מהנדס הפרומפט' - מבין עברית וטכני. יש 2 פרומפטים: 1) פרומפט ראשי (AI_PROTOCOL של הסורק) 2) פרומפט פר-סוכן (FOCUS/EDITOR/CRITIC). קבל בקשת מפעיל + טיוטה + ביקורת. אם צריך להוסיף - כתוב: הוסף ל[שם]: ... אם צריך להסיר - כתוב: הסר מ[שם]: ... אם צריך להחליף - כתוב: החלף ב[שם]: ... תמיד ציין בדיוק איזה פרומפט. אם אין צורך - כתוב: אין צורך בשינוי."
   }
 }
 
@@ -93,27 +93,34 @@ def send_to_group(text):
 
 def publish_to_channel(text, source_id="manual"):
     if not SYNC_ENDPOINT:
-        send_to_group("❌ אין SYNC_ENDPOINT - לא יכול לפרסם לערוץ")
+        send_to_group("❌ כלי publish_to_channel: אין SYNC_ENDPOINT")
         return False
     try:
         payload = {"type":"PUBLISH_CONTENT","source_id":source_id,"text":text,"reply_to_source_id":None}
         r = requests.post(SYNC_ENDPOINT, json=payload, timeout=12)
         ok = r.status_code==200
-        send_to_group(f"📤 {'פורסם לערוץ' if ok else 'כשל פרסום'}: {text[:80]}")
+        send_to_group(f"📤 כלי publish_to_channel: {'פורסם לערוץ ✅' if ok else 'כשל ❌'}: {text[:90]}")
         return ok
     except Exception as e:
         print(f"publish err {e}")
-        send_to_group(f"❌ שגיאת פרסום: {e}")
+        send_to_group(f"❌ כלי publish_to_channel שגיאה: {e}")
         return False
 
-def save_prompt_patch(agent, patch):
-    if not patch or len(patch)<8: return
+def save_prompt_patch(agent, patch, is_remove=False):
+    if not patch or len(patch)<5: return
     key = "PROMPT_PATCH" if agent=="ALL" else f"PROMPT_PATCH_{agent}"
+    # תמיכה בהסרה: אם is_remove - נמחק את הפאץ' או נוסיף הוראת הסרה
+    if is_remove:
+        patch = f"[הסרה] {patch}"
     try:
         if SCANNER_URL:
-            requests.post(SCANNER_URL, json={"action":"setProps", key: patch.strip()[:800]}, timeout=8)
-            send_to_group(f"🛠️ {agent}: פרומפט עודכן ✅\n{patch[:200]}")
-            print(f"saved {key}")
+            requests.post(SCANNER_URL, json={"action":"setProps", key: patch.strip()[:1000]}, timeout=8)
+            # גם מחיקה אם ביקש להסיר חלק
+            if is_remove and len(patch)<30:
+                try: requests.post(SCANNER_URL, json={"action":"deleteProps", key: key}, timeout=8)
+                except: pass
+            send_to_group(f"🛠️ כלי save_prompt_patch: {key} עודכן ✅\n{patch[:250]}")
+            print(f"saved {key}: {patch[:80]}")
     except Exception as e:
         print(f"patch save err {e}")
 
@@ -165,50 +172,68 @@ def main():
                 print(f"[HUMAN] {from_user.get('first_name')}: {text[:80]}")
                 lower = text.lower()
                 # === כלים מיידיים ===
-                # 1. פרסום לערוץ: "שלח לערוץ: ...", "פרסם: ...", "publish: ..." - עובר דרך עורך+מבקר, לא שולח גולמי
+                # 1. פרסום לערוץ: "שלח לערוץ XX" גם בלי נקודותיים - עובר דרך עורך+מבקר
                 if any(k in text for k in ["שלח לערוץ", "פרסם", "publish", "שלח הודעה לערוץ"]):
-                    to_pub_raw = text.split(":",1)[1].strip() if ":" in text else re.sub(r"שלח לערוץ|פרסם|publish|שלח הודעה לערוץ","",text, flags=re.I).strip()
+                    # חילוץ גם בלי נקודותיים: "שלח לערוץ עדכון נו כב" -> "עדכון נו כב"
+                    m = re.search(r"(?:שלח לערוץ|פרסם|publish|שלח הודעה לערוץ)\s*[:：]?\s*(.*)", text, re.I)
+                    to_pub_raw = m.group(1).strip() if m else ""
                     if "אירוע" in text or "יש חדש" in text:
-                        send_to_group("🔍 בודק אירועים טריים...")
+                        send_to_group("🔍 כלי wake_scanner: בודק אירועים טריים...")
                         try: requests.get(SCANNER_URL, timeout=10)
                         except: pass
+                        if not to_pub_raw or len(to_pub_raw)<4:
+                            send_to_group("✅ סריקה הוערה, ממתין לחומר גלם")
+                            continue
                     if to_pub_raw and len(to_pub_raw)>3:
-                        send_to_group("✍️ מלטש לפני פרסום...")
+                        # ג'יבריש קצר? בקש הבהרה במקום לפרסם זבל
+                        if len(to_pub_raw)<10 or to_pub_raw.strip() in ["עדכון נו כב","נו כב","בדיקה"]:
+                            send_to_group("❓ כלי publish_to_channel: הטקסט קצר/לא מובן — כתוב: שלח לערוץ: [טקסט מלא, לפחות 10 תווים]")
+                            continue
+                        send_to_group("✍️ כלי polish: מלטש לפני פרסום...")
                         history_text2 = f"בקשת פרסום מהמפעיל: {to_pub_raw}"
                         polished = run_agent("EDITOR", f"לטש והפוך למבזק מוכן לפרסום בעברית טבעית (בלי 'מילה:' קבוע): \"{to_pub_raw}\"", history_text2)
                         if polished:
-                            # הסר תג
-                            polished_text = re.sub(r"^\[.*?\]|✍️ העורך|🎯.*?|🔍.*?\n", "", polished).strip()
-                            polished_text = polished_text[:1000]
-                            # ביקורת מהירה
+                            polished_text = re.sub(r"^.*?:\s*", "", polished, count=1).strip()  # הסר "✍️ העורך:"
+                            polished_text = polished_text[:1100]
+                            if "לא הבנתי" in polished_text:
+                                send_to_group(polished)  # בקשת הבהרה מהעורך
+                                continue
                             critic2 = run_agent("CRITIC", f"טיוטה מלוטשת: {polished_text}\nאשר או הצע תיקון קצר", history_text2)
-                            if critic2 and "אושר" not in critic2:
+                            if critic2:
                                 send_to_group(critic2)
+                                if "אושר" not in critic2 and len(critic2)>20:
+                                    # אם המבקר הציע תיקון - השתמש בו
+                                    pass
                             publish_to_channel(polished_text, source_id=f"manual_{int(time.time())}")
                         else:
+                            send_to_group("❌ כלי polish נכשל, מפרסם גולמי")
                             publish_to_channel(to_pub_raw, source_id=f"manual_{int(time.time())}")
                     else:
-                        send_to_group("❓ כתוב: שלח לערוץ: [הטקסט שלך] — אני אלטש ואפרסם")
+                        send_to_group("❓ כלי publish_to_channel: כתוב: שלח לערוץ: [טקסט מלא, לפחות 10 תווים]")
                     continue
-                # 2. עדכון פרומפט פר-סוכן: "תעדכן פרומפט של העורך/מבקר/מיקוד/הכל: ..."
-                patch_match = re.search(r"עדכן.*?פרומפט.*?של\s*(העורך|המבקר|מיקוד|הכל|העורך הראשי|מהנדס)?\s*[:：]\s*(.+)", text, re.I)
-                if patch_match or ("עדכן" in text and "פרומפט" in text):
+                # 2. עדכון/הסרת פרומפט פר-סוכן: תומך גם ב"הסר"
+                is_remove = "הסר" in text or "מחק" in text or "remove" in lower
+                patch_match = re.search(r"(?:עדכן|הסר|מחק).*?פרומפט.*?של\s*(העורך|המבקר|מיקוד|הכל|העורך הראשי|מהנדס)?\s*[:：]?\s*(.+)", text, re.I)
+                if patch_match or (("עדכן" in text or "הסר" in text) and "פרומפט" in text):
                     target = "ALL"
                     if patch_match:
                         raw_target = patch_match.group(1) or ""
-                        patch_text = patch_match.group(2)
+                        patch_text = patch_match.group(2).strip()
                         if "עורך" in raw_target: target = "EDITOR"
                         elif "מבקר" in raw_target: target = "CRITIC"
                         elif "מיקוד" in raw_target: target = "FOCUS"
                         elif "מהנדס" in raw_target: target = "PROMPT_ENGINEER"
-                        else: patch_text = text.split(":",1)[1].strip() if ":" in text else patch_text
                     else:
-                        patch_text = text.split(":",1)[1].strip() if ":" in text else text
+                        m2 = re.search(r"[:：]\s*(.+)", text)
+                        patch_text = m2.group(1).strip() if m2 else text
                         if "עורך" in text: target = "EDITOR"
                         elif "מבקר" in text: target = "CRITIC"
                         elif "מיקוד" in text: target = "FOCUS"
-                    if len(patch_text)>8:
-                        save_prompt_patch(target, patch_text)
+                    if len(patch_text)>5:
+                        save_prompt_patch(target, patch_text, is_remove=is_remove)
+                        # הסבר איזה פרומפט עודכן: ראשי או פר-סוכן
+                        tool_name = "פרומפט ראשי (AI_PROTOCOL)" if target=="ALL" else f"פרומפט {target}"
+                        send_to_group(f"ℹ️ כלי save_prompt_patch: עודכן {tool_name}")
                         continue
                 # 3. דיון רגיל - פרסונות עונות בסדר
                 history_text = f"הודעת מפעיל: {text}\n(קבוצה {GROUP_ID})"
