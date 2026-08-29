@@ -217,6 +217,13 @@ def wake_google():
         except Exception as e:
             if "timeout" not in str(e).lower(): print(f"wake err {e}")
 
+def sync_context_to_scanner(history_str):
+    if not SCANNER_URL: return
+    try:
+        requests.post(SCANNER_URL, json={"action": "syncGroupContext", "context": history_str[-25000:]}, timeout=6)
+    except Exception as e:
+        print(f"syncGroupContext err: {e}")
+
 def execute_agent_tools(agent_name, agent_output, history_str):
     """Parses and executes any autonomous tools requested by the agent."""
     if not agent_output: return
@@ -231,16 +238,19 @@ def execute_agent_tools(agent_name, agent_output, history_str):
     pub_match = re.search(r"\[כלי:\s*פרסום:\s*([^\]]+)\]", agent_output)
     if pub_match:
         to_pub = pub_match.group(1).strip()
-        print(f"[{agent_name}] Triggered PUBLISH tool: {to_pub[:60]}")
-        publish_to_channel(to_pub, source_id=f"{agent_name.lower()}_{int(time.time())}")
+        # Protect against dummy placeholders
+        if len(to_pub) > 20 and not any(p in to_pub for p in ["נוסח המבזק", "טקסט המבזק", "הטקסט כאן", "נוסח כאן", "...", "כותרת ותוכן"]):
+            print(f"[{agent_name}] Triggered PUBLISH tool: {to_pub[:60]}")
+            publish_to_channel(to_pub, source_id=f"{agent_name.lower()}_{int(time.time())}")
 
     # 3. Check for prompt update tool [כלי: עדכון_פרומפט: ...]
     prompt_match = re.search(r"\[כלי:\s*עדכון_פרומפט:\s*([^:]+):\s*([^\]]+)\]", agent_output)
     if prompt_match:
         target_agent = prompt_match.group(1).strip()
         patch_body = prompt_match.group(2).strip()
-        print(f"[{agent_name}] Triggered PROMPT_UPDATE tool for {target_agent}")
-        save_prompt_patch(target_agent, patch_body)
+        if len(patch_body) > 10 and not any(p in patch_body for p in ["הטקסט", "שם_הסוכן", "..."]):
+            print(f"[{agent_name}] Triggered PROMPT_UPDATE tool for {target_agent}")
+            save_prompt_patch(target_agent, patch_body)
 
     # 4. Check for delegation / inter-agent call [כלי: קריאה: @סוכן ...]
     call_match = re.search(r"\[כלי:\s*קריאה:\s*@?([^\s:]+)\s*([^\]]+)\]", agent_output)
@@ -326,6 +336,9 @@ def main():
                 if len(chat_history) > 100: chat_history = chat_history[-100:]
                 history_str = "\n".join(chat_history)
 
+                # Sync full context to Google Apps Script scanner so both systems are in the same universe
+                sync_context_to_scanner(history_str)
+
                 # ONLY skip auto-responding if the message actually came from a bot account
                 if is_bot:
                     continue
@@ -358,8 +371,25 @@ def main():
                     publish_to_channel(polished_text, source_id=f"manual_{int(time.time())}")
                     continue
 
-                # === 3. פקודות צפייה ועריכת פרומפט ===
-                if "הראה פרומפט" in text or "הצג פרומפט" in text or "show prompt" in lower:
+                # === 3. אישור אנושי מפורש לפרסום הטיוטה האחרונה שנחסמה ===
+                if any(k in text for k in ["תפרסם על האירוע", "תפרסם את זה", "לפרסם את הטיוטה", "לפרסם על האירוע", "אשר פרסום"]):
+                    # חפש את הטיוטה האחרונה בהיסטוריה
+                    last_draft = None
+                    for h_msg in reversed(chat_history):
+                        if "טיוטה לפרסום" in h_msg or "📝" in h_msg:
+                            # חלץ את גוף הטיוטה
+                            draft_match = re.search(r"(?:טיוטה לפרסום\n\n|📝\s*)([^\n]+(?:\n[^\n]+)?)", h_msg)
+                            if draft_match:
+                                last_draft = draft_match.group(1).strip()
+                                last_draft = re.sub(r"(?:🎯|🔍|📊|📎)[\s\S]*", "", last_draft).strip()
+                                break
+                    if last_draft and len(last_draft) > 15:
+                        send_to_group(f"✍️ העורך הראשי אישר פרסום חריג לפי הוראת המפעיל:\n{last_draft}")
+                        publish_to_channel(last_draft, source_id=f"human_override_{int(time.time())}")
+                        continue
+
+                # === 4. פקודות צפייה ועריכת פרומפט גולמי ===
+                if "הראה פרומפט" in text or "הצג פרומפט" in text or "הפרומפט הגולמי" in text or "show prompt" in lower:
                     which = "ALL"
                     if "עורך" in text: which="EDITOR"
                     elif "מבקר" in text: which="CRITIC"
@@ -370,8 +400,10 @@ def main():
                         j = r.json() if r.headers.get("content-type","").startswith("application/json") else json.loads(r.text)
                         for k,v in j.items():
                             if k=="PATCHES": continue
-                            send_to_group(f"📄 פרומפט {k}:\n{v[:3000]}")
+                            send_to_group(f"📄 <b>פרומפט גולמי {k}:</b>\n<pre>{v[:3500]}</pre>")
                             time.sleep(0.6)
+                        if j.get("PATCHES"):
+                            send_to_group(f"🩹 <b>פאצ'ים שמורים:</b>\n<pre>{json.dumps(j['PATCHES'], ensure_ascii=False, indent=2)[:1000]}</pre>")
                     except Exception as e:
                         send_to_group(f"❌ שגיאה בקריאת הפרומפט: {e}")
                     continue
@@ -388,12 +420,12 @@ def main():
                         continue
                     try:
                         r = requests.post(SCANNER_URL, json={"action":"setPrompt","which":which,"text":new_text}, timeout=12)
-                        send_to_group(f"✅ פרומפט {which} עודכן בהצלחה.")
+                        send_to_group(f"✅ פרומפט {which} עודכן בהצלחה בגוגל סקריפט.")
                     except Exception as e:
                         send_to_group(f"❌ שגיאה בעדכון פרומפט: {e}")
                     continue
 
-                # === 4. פנייה ישירה לסוכן ספציפי (עם ביצוע כלים אוטונומי) ===
+                # === 5. פנייה ישירה לסוכן ספציפי (עם ביצוע כלים אוטונומי) ===
                 single_agent = None
                 if any(k in text for k in ["@עורך", "עורך ת", "תקרא לעורך"]): single_agent = "EDITOR"
                 elif any(k in text for k in ["@מבקר", "מבקר ת", "תקרא למבקר"]): single_agent = "CRITIC"
@@ -408,7 +440,7 @@ def main():
                         execute_agent_tools(single_agent, resp, history_str)
                     continue
 
-                # === 5. דיון מערכת בין כל הסוכנים ===
+                # === 6. דיון מערכת בין כל הסוכנים ===
                 if "תדברו ביניכם" in text or "דיון מערכת" in text or "שיחה ביניכם" in text:
                     current_hist = history_str
                     for name in ["FOCUS", "EDITOR", "CRITIC"]:
@@ -421,7 +453,7 @@ def main():
                             time.sleep(1.2)
                     continue
 
-                # === 6. שיחה טבעית של המפעיל (מענה עורך ראשי + הפעלת כלים אוטונומית) ===
+                # === 7. שיחה טבעית של המפעיל (מענה עורך ראשי + הפעלת כלים אוטונומית) ===
                 resp = run_agent("FOCUS", text, history_str)
                 if resp:
                     send_to_group(resp)
