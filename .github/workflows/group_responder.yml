@@ -1,0 +1,30 @@
+name: Group Responder 6h
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"  # every 6 hours
+  workflow_dispatch:
+
+jobs:
+  respond:
+    runs-on: ubuntu-latest
+    timeout-minutes: 370  # 6h + margin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install deps
+        run: pip install requests -q
+      - name: Run responder 6h (poll every 1.5s, persona order clear)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          EDITOR_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          EDITOR_GROUP_ID: ${{ secrets.EDITOR_GROUP_ID }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          SCANNER_URL: ${{ secrets.SCANNER_URL }}
+          SYNC_ENDPOINT: ${{ secrets.SYNC_ENDPOINT }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+        run: |
+          echo "Starting 6h responder GROUP=$EDITOR_GROUP_ID"
+          timeout 21600 python forwarder/group_responder.py || echo "6h finished"
