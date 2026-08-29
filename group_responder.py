@@ -293,16 +293,23 @@ def main():
     
     chat_history = []
     
-    # Pre-populate active draft from Google Apps Script if available
+    # Pre-populate full newsroom history (past publications, active drafts, group discussion) from Google Apps Script
     if SCANNER_URL:
         try:
-            r_draft = requests.post(SCANNER_URL, json={"action":"getLastDraft"}, timeout=8)
-            d_json = r_draft.json() if r_draft.headers.get("content-type","").startswith("application/json") else json.loads(r_draft.text)
-            if d_json.get("draft_raw"):
-                chat_history.append(f"[מערכת (טיוטה פעילה)]: {d_json['draft_raw']}")
-                print(f"Loaded active draft on startup: {d_json.get('draft_text', '')[:60]}")
+            r_hist = requests.post(SCANNER_URL, json={"action":"getNewsroomHistory"}, timeout=10)
+            h_data = r_hist.json() if r_hist.headers.get("content-type","").startswith("application/json") else json.loads(r_hist.text)
+            if h_data.get("published_snippets"):
+                for p_snip in h_data["published_snippets"]:
+                    chat_history.append(p_snip)
+            if h_data.get("last_draft_raw"):
+                chat_history.append(f"[מערכת (טיוטה אחרונה)]: {h_data['last_draft_raw']}")
+            if h_data.get("recent_group_context"):
+                for line in h_data["recent_group_context"].split("\n")[-15:]:
+                    if line.strip() and line not in chat_history:
+                        chat_history.append(line.strip())
+            print(f"Pre-loaded {len(chat_history)} history entries on startup!")
         except Exception as e:
-            print(f"pre-load draft err: {e}")
+            print(f"pre-load history err: {e}")
 
     while time.time() - start < DURATION:
         try:
