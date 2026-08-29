@@ -96,10 +96,25 @@ def publish_to_channel(text, source_id="manual"):
         send_to_group("❌ כלי publish_to_channel: אין SYNC_ENDPOINT")
         return False
     try:
-        payload = {"type":"PUBLISH_CONTENT","source_id":source_id,"text":text,"reply_to_source_id":None}
+        clean_text = str(text or "").strip()
+        # Clean markdown code fences and JSON if present
+        clean_text = re.sub(r"^```(?:json)?\s*", "", clean_text, flags=re.I)
+        clean_text = re.sub(r"\s*```$", "", clean_text)
+        if clean_text.startswith("{") and ("final_text" in clean_text or "action" in clean_text):
+            try:
+                m = re.search(r"\{[\s\S]*\}", clean_text)
+                if m:
+                    pj = json.loads(m.group(0))
+                    clean_text = str(pj.get("final_text") or pj.get("text") or clean_text).strip()
+            except: pass
+        if not clean_text or clean_text.startswith('{"') or '"action":' in clean_text:
+            send_to_group("🛑 כלי publish_to_channel נחסם: הטקסט מכיל JSON גולמי")
+            return False
+
+        payload = {"type":"PUBLISH_CONTENT","source_id":source_id,"text":clean_text,"reply_to_source_id":None}
         r = requests.post(SYNC_ENDPOINT, json=payload, timeout=12)
         ok = r.status_code==200
-        send_to_group(f"📤 כלי publish_to_channel: {'פורסם לערוץ ✅' if ok else 'כשל ❌'}: {text[:90]}")
+        send_to_group(f"📤 כלי publish_to_channel: {'פורסם לערוץ ✅' if ok else 'כשל ❌'}: {clean_text[:90]}")
         return ok
     except Exception as e:
         print(f"publish err {e}")
@@ -171,6 +186,9 @@ def main():
                 text = (msg.get("text") or msg.get("caption") or "").strip()
                 if not text or len(text)<2: continue
                 if text.startswith("/"): continue
+                # Ignore automated draft broadcasts to avoid feedback cascade
+                if text.startswith("📝") or "טיוטה לפרסום" in text or text.startswith("🤖") or "כלי wake_scanner" in text or "כלי publish_to_channel" in text:
+                    continue
                 print(f"[HUMAN] {from_user.get('first_name')}: {text[:80]}")
                 lower = text.lower()
                 # === קריאה לסוכן בודד - ברור לגמרי ===
