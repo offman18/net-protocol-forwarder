@@ -127,8 +127,10 @@ def save_prompt_patch(agent, patch, is_remove=False):
 def wake_google():
     for url in [SCANNER_URL, SYNC_ENDPOINT]:
         if not url: continue
-        try: requests.get(url, timeout=8); print(f"woke {url[:40]}")
-        except: pass
+        try: requests.get(url, timeout=30); print(f"woke {url[:40]}")
+        except Exception as e:
+            # timeout is ok - scanner still running in background
+            if "timeout" not in str(e).lower(): print(f"wake err {e}")
 
 def main():
     print(f"Starting group_responder GROUP={GROUP_ID} bot={BOT_TOKEN[:6]}... models={KIMI_MODELS[0]}...")
@@ -181,10 +183,14 @@ def main():
                         send_to_group(router)
                         send_to_group("🔍 כלי wake_scanner: סורק 50 מקורות...")
                         try:
-                            r = requests.get(SCANNER_URL, timeout=12)
-                            send_to_group(f"✅ סריקה הוערה, טיוטה תגיע תוך דקה")
+                            r = requests.get(SCANNER_URL, timeout=30)
+                            send_to_group(f"✅ סריקה הוערה ({r.status_code}), טיוטה תגיע תוך דקה")
                         except Exception as e:
-                            send_to_group(f"❌ שגיאת סריקה: {e}")
+                            # timeout זה גם הצלחה - הסורק רץ ברקע גם אם גוגל איטי
+                            if "Read timed out" in str(e) or "timeout" in str(e).lower():
+                                send_to_group(f"✅ סריקה הוערה (timeout אבל רץ ברקע), טיוטה תגיע תוך דקה")
+                            else:
+                                send_to_group(f"❌ שגיאת סריקה: {e}")
                         continue
                     elif "publish_to_channel" in router.lower():
                         chosen = "publish"
