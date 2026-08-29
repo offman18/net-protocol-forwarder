@@ -27,4 +27,4 @@ jobs:
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
         run: |
           echo "Starting 6h responder GROUP=$EDITOR_GROUP_ID"
-          timeout 21600 python forwarder/group_responder.py || echo "6h finished"
+          timeout 21600 python group_responder.py || echo "6h finished"
