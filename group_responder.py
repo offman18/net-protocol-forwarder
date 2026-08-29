@@ -172,6 +172,15 @@ def main():
                 print(f"[HUMAN] {from_user.get('first_name')}: {text[:80]}")
                 lower = text.lower()
                 # === כלים מיידיים ===
+                # 0. סריקה יזומה: "תסרוק", "סרוק", "תפרסם חדשות"
+                if any(k in text for k in ["תסרוק", "סרוק", "תפרסם חדשות", "פרסם חדשות"]):
+                    send_to_group("🔍 כלי wake_scanner: סורק 50 מקורות...")
+                    try:
+                        r = requests.get(SCANNER_URL, timeout=12)
+                        send_to_group(f"✅ סריקה הוערה ({r.status_code}), טיוטה תגיע לקבוצה תוך דקה")
+                    except Exception as e:
+                        send_to_group(f"❌ שגיאת סריקה: {e}")
+                    continue
                 # 1. פרסום לערוץ: "שלח לערוץ XX" גם בלי נקודותיים - עובר דרך עורך+מבקר
                 if any(k in text for k in ["שלח לערוץ", "פרסם", "publish", "שלח הודעה לערוץ"]):
                     # חילוץ גם בלי נקודותיים: "שלח לערוץ עדכון נו כב" -> "עדכון נו כב"
