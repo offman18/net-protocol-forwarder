@@ -91,6 +91,32 @@ def send_to_group(text):
         print(f"send err {e}")
         return False
 
+def publish_to_channel(text, source_id="manual"):
+    if not SYNC_ENDPOINT:
+        send_to_group("❌ אין SYNC_ENDPOINT - לא יכול לפרסם לערוץ")
+        return False
+    try:
+        payload = {"type":"PUBLISH_CONTENT","source_id":source_id,"text":text,"reply_to_source_id":None}
+        r = requests.post(SYNC_ENDPOINT, json=payload, timeout=12)
+        ok = r.status_code==200
+        send_to_group(f"📤 {'פורסם לערוץ' if ok else 'כשל פרסום'}: {text[:80]}")
+        return ok
+    except Exception as e:
+        print(f"publish err {e}")
+        send_to_group(f"❌ שגיאת פרסום: {e}")
+        return False
+
+def save_prompt_patch(agent, patch):
+    if not patch or len(patch)<8: return
+    key = "PROMPT_PATCH" if agent=="ALL" else f"PROMPT_PATCH_{agent}"
+    try:
+        if SCANNER_URL:
+            requests.post(SCANNER_URL, json={"action":"setProps", key: patch.strip()[:800]}, timeout=8)
+            send_to_group(f"🛠️ {agent}: פרומפט עודכן ✅\n{patch[:200]}")
+            print(f"saved {key}")
+    except Exception as e:
+        print(f"patch save err {e}")
+
 def wake_google():
     for url in [SCANNER_URL, SYNC_ENDPOINT]:
         if not url: continue
@@ -137,30 +163,60 @@ def main():
                 if not text or len(text)<2: continue
                 if text.startswith("/"): continue
                 print(f"[HUMAN] {from_user.get('first_name')}: {text[:80]}")
-                # collect group context (last 10 msgs) for agents
-                # simple: use current text + recent history placeholder
+                lower = text.lower()
+                # === כלים מיידיים ===
+                # 1. פרסום לערוץ: "שלח לערוץ: ...", "פרסם: ...", "publish: ..."
+                if any(k in text for k in ["שלח לערוץ", "פרסם", "publish", "שלח הודעה לערוץ"]):
+                    # חלץ טקסט אחרי ":"
+                    to_pub = text.split(":",1)[1].strip() if ":" in text else re.sub(r"שלח לערוץ|פרסם|publish","",text, flags=re.I).strip()
+                    if to_pub and len(to_pub)>3:
+                        # אם ביקש "יש אירוע?" - בדוק חדשות
+                        if "אירוע" in text or "יש חדש" in text:
+                            send_to_group("🔍 בודק אירועים טריים...")
+                            try: requests.get(SCANNER_URL, timeout=10)
+                            except: pass
+                        publish_to_channel(to_pub, source_id=f"manual_{int(time.time())}")
+                    else:
+                        send_to_group("❓ כתוב: שלח לערוץ: [טקסט]")
+                    continue
+                # 2. עדכון פרומפט פר-סוכן: "תעדכן פרומפט של העורך/מבקר/מיקוד/הכל: ..."
+                patch_match = re.search(r"עדכן.*?פרומפט.*?של\s*(העורך|המבקר|מיקוד|הכל|העורך הראשי|מהנדס)?\s*[:：]\s*(.+)", text, re.I)
+                if patch_match or ("עדכן" in text and "פרומפט" in text):
+                    target = "ALL"
+                    if patch_match:
+                        raw_target = patch_match.group(1) or ""
+                        patch_text = patch_match.group(2)
+                        if "עורך" in raw_target: target = "EDITOR"
+                        elif "מבקר" in raw_target: target = "CRITIC"
+                        elif "מיקוד" in raw_target: target = "FOCUS"
+                        elif "מהנדס" in raw_target: target = "PROMPT_ENGINEER"
+                        else: patch_text = text.split(":",1)[1].strip() if ":" in text else patch_text
+                    else:
+                        patch_text = text.split(":",1)[1].strip() if ":" in text else text
+                        if "עורך" in text: target = "EDITOR"
+                        elif "מבקר" in text: target = "CRITIC"
+                        elif "מיקוד" in text: target = "FOCUS"
+                    if len(patch_text)>8:
+                        save_prompt_patch(target, patch_text)
+                        continue
+                # 3. דיון רגיל - פרסונות עונות בסדר
                 history_text = f"הודעת מפעיל: {text}\n(קבוצה {GROUP_ID})"
                 # === PERSONA ORDER - ברור מי שולח ===
-                # 1. FOCUS - אחראי מיקוד
                 focus = run_agent("FOCUS", f"המפעיל כתב: \"{text}\" - על מה להתמקד? הסבר בעברית.", history_text)
                 if focus: send_to_group(focus); time.sleep(1.3)
-                # 2. EDITOR - העורך
                 editor = run_agent("EDITOR", f"המפעיל כתב: \"{text}\" - נסח הודעה בהתאם בעברית טבעית.", history_text + ("\n"+focus if focus else ""))
                 if editor: send_to_group(editor); time.sleep(1.3)
-                # 3. CRITIC - המבקר
                 if editor:
                     critic = run_agent("CRITIC", f"טיוטה: {editor}\nבדוק אם אנושי?", history_text)
                     if critic: send_to_group(critic); time.sleep(1.2)
-                # 4. PROMPT_ENGINEER - רק אם צריך
-                if "פרומפט" in text or "prompt" in text.lower() or (focus and "הצעת פרומפט" in focus):
+                if "פרומפט" in text or "prompt" in lower or (focus and "הצעת פרומפט" in focus):
                     pe = run_agent("PROMPT_ENGINEER", f"המפעיל: {text}\nFOCUS: {focus}\nהאם לעדכן פרומפט?", history_text)
                     if pe: send_to_group(pe)
-                # שמירת הצעת פרומפט
                 try:
                     if focus and "הצעת פרומפט" in focus:
                         m=re.search(r"הצעת פרומפט:\s*(.+)", focus)
-                        if m and len(m.group(1))>10 and SCANNER_URL:
-                            requests.post(SCANNER_URL, json={"action":"setProps","PROMPT_PATCH": m.group(1).strip()}, timeout=8)
+                        if m and len(m.group(1))>10:
+                            save_prompt_patch("ALL", m.group(1).strip())
                 except: pass
 
         except Exception as e:
