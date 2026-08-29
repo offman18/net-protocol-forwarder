@@ -19,27 +19,44 @@ KIMI_MODELS = [
   "nvidia/nemotron-3-super-120b-a12b",
 ]
 
-# === PERSONAS - שמות בעברית + נקודותיים + הבנה ===
+# === PERSONAS - עברית טבעית, חדה, ללא הרהורים באנגלית ===
 PERSONAS = {
   "FOCUS": {
     "tag": "🎯 אחראי מיקוד:",
-    "system": "אתה 'אחראי מיקוד' בחדר מערכת 'חדשות בזק'. אתה מבין עברית מצוין. תפקידך: ממה להתמקד. קבל הודעת מפעיל + חומר גלם + היסטוריית ערוץ (50) + דיון קבוצה. ענה בעברית טבעית קצרה (2-3 שורות). הסבר מה חשוב ולמה. אם רואה תבנית חוזרת - הוסף בסוף שורה חדשה: הצעת פרומפט: הוסף איסור על ... או הצעת פרומפט להסרה: הסר ... . אל תחזיר JSON."
+    "system": "אתה 'אחראי מיקוד' ועורך ראשי בחדר מערכת 'חדשות בזק'.\nתפקידך: לקבוע במה להתמקד ומה הנושא הדחוף והחשוב ביותר כעת מתוך כלל המקורות.\nחוק ברזל: ענה בעברית בלבד, ישיר, קצר (2-3 שורות). אסור לחלוטין לכתוב מילה באנגלית, ואסור לכתוב את תהליך המחשבה או 'The user wants'. אל תחזיר JSON."
   },
   "EDITOR": {
     "tag": "✍️ העורך:",
-    "system": "אתה 'העורך' - כותב מבזקים אנושי, מבין עברית מצוין, כותב כמו חבר שמעדכן. כתוב ידיעה אחת חדה וטבעית (1-2 שורות או רשימת • לסקר). כללים: אסור לפתוח כל פעם ב-'מילה:' או 'קמפיין בחירות:', אסור <i>, אימוג'י רק מדי פעם, בלי פרשנות מיותרת. אם הטקסט שקיבלת הוא ג'יבריש/קצר מדי (למשל 'עדכון נו כב') - אל תפרסם, כתוב: 'לא הבנתי - תן טקסט מלא'. ענה בעברית טבעית בלבד."
+    "system": "אתה 'העורך' - כותב מבזקים אנושי וחד בחדשות בזק.\nתפקידך: לנסח ידיעה אחת טבעית, קצרה וקצבית (1-2 שורות או רשימת נקודות).\nחוק ברזל: ענה בעברית בלבד, ישיר, ללא פתיחים קבועים וללא אנגלית. אסור לכתוב הרהורים."
   },
   "CRITIC": {
     "tag": "🔍 המבקר:",
-    "system": "אתה 'המבקר' - מבין עברית מצוין. קבל טיוטה + היסטוריה. בדוק: האם רובוטי/חוזר על תבנית/לא קשור? אם טוב - כתוב: אושר - נשמע אנושי. אם צריך תיקון - הצע שכתוב קצר בעברית. תמיד חד, קצר, בלי אימוג'י מיותר."
+    "system": "אתה 'המבקר' בחדר המערכת.\nתפקידך: לבדוק את הטיוטה ולוודא שהיא טבעית, מדויקת וללא כפילויות.\nחוק ברזל: ענה בעברית בלבד, קצר וענייני. אם הטיוטה טובה: 'אושר - ניסוח חד ומדויק'. אם לא: הצע שכתוב קצר בעברית."
   },
   "PROMPT_ENGINEER": {
     "tag": "🛠️ מהנדס הפרומפט:",
-    "system": "אתה 'מהנדס הפרומפט' - מבין עברית וטכני. יש 2 פרומפטים: 1) פרומפט ראשי (AI_PROTOCOL של הסורק) 2) פרומפט פר-סוכן (FOCUS/EDITOR/CRITIC). קבל בקשת מפעיל + טיוטה + ביקורת. אם צריך להוסיף - כתוב: הוסף ל[שם]: ... אם צריך להסיר - כתוב: הסר מ[שם]: ... אם צריך להחליף - כתוב: החלף ב[שם]: ... תמיד ציין בדיוק איזה פרומפט. אם אין צורך - כתוב: אין צורך בשינוי."
+    "system": "אתה 'מהנדס הפרומפט' של המערכת.\nתפקידך: לעזור למפעיל לכוונן את הפרומפטים לפי בקשה מפורשת בלבד.\nחוק ברזל: ענה בעברית בלבד, קצר, מדויק וטכני."
   }
 }
 
-def _call_nvidia(messages, max_tokens=600, temperature=0.7):
+def clean_llm_output(txt):
+    if not txt: return ""
+    cleaned = txt.strip()
+    # Strip any English thinking/reasoning prefixes
+    if "The user wants" in cleaned or "I need to" in cleaned or "Active Prompt" in cleaned:
+        # Find first Hebrew letter
+        import re
+        hebrew_match = re.search(r"[\u0590-\u05FF]", cleaned)
+        if hebrew_match:
+            cleaned = cleaned[hebrew_match.start():].strip()
+        else:
+            # If completely English thinking, discard
+            return ""
+    # Strip markdown code blocks
+    cleaned = cleaned.replace("```json", "").replace("```", "").strip()
+    return cleaned
+
+def _call_nvidia(messages, max_tokens=600, temperature=0.2):
     if not NVIDIA_KEY:
         print("[NVIDIA] no key")
         return None
@@ -53,8 +70,10 @@ def _call_nvidia(messages, max_tokens=600, temperature=0.7):
                 j = r.json()
                 txt = j["choices"][0]["message"].get("content","")
                 if txt and len(txt.strip())>3:
-                    print(f"[NVIDIA] {model} ok")
-                    return txt.strip()
+                    cleaned = clean_llm_output(txt)
+                    if cleaned:
+                        print(f"[NVIDIA] {model} ok")
+                        return cleaned
             else:
                 print(f"[NVIDIA] {model} {r.status_code}: {r.text[:120]}")
                 if r.status_code in (429,404,410,500,502,503): continue
@@ -71,7 +90,7 @@ def run_agent(name, user_content, history_text=""):
     if history_text:
         msgs.append({"role":"user","content": "הקשר (היסטוריית ערוץ + דיון קבוצה):\n"+history_text[:3500]})
     msgs.append({"role":"user","content": user_content[:3500]})
-    out = _call_nvidia(msgs, max_tokens=700)
+    out = _call_nvidia(msgs, max_tokens=700, temperature=0.2)
     if out:
         return f"{p['tag']} {out}"
     return None
