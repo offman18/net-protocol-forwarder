@@ -19,7 +19,7 @@ KIMI_MODELS = [
   "nvidia/nemotron-3-super-120b-a12b",
 ]
 
-# === UNIFIED TOOLS DEFINITION - מפת כלים מלאה לכל הסוכנים ===
+# === UNIFIED TOOLS DEFINITION - מפת כלים מלאה ואיסור דיבורי סרק ===
 UNIFIED_TOOLS_DOCS = """
 🛠️ ארגז הכלים המערכתי (מופעל ע"י כתיבת התגית בטקסט):
 1. [כלי: סריקה] - הפעלת סריקת מודיעין של כל 35 מקורות הגלם ברקע.
@@ -32,7 +32,10 @@ UNIFIED_TOOLS_DOCS = """
    • @מהנדס : עדכון פרומפטים וכיול כללי AI.
    • @אנליסט : ניתוח מקורות אויב זרים (ערבית/פרסית/רוסית) ורקע טקטי.
 
-חוק ברזל: כשנדרשת פעולה מעשית – חובה להפעיל את הכלי המתאים מיד! ענה תמיד בעברית בלבד."""
+⛔ חוק ברזל עליון (איסור מוחלט על דיבורי סרק!):
+1. אסור לחלוטין להצהיר שביצעת פעולה, שאתה מעדכן, שאתה סורק או שאתה מפרסם — ללא כתיבת תגית הכלי המתאימה במפורש באותה הודעה!
+2. לעולם אל תגיד "מעדכן את הפרומפט" בלי [כלי: עדכון_פרומפט: ...]. לעולם אל תגיד "מפרסם" בלי [כלי: פרסום: ...].
+3. כל שינוי/פעולה שביקש המפעיל חייבת להתבצע באמצעות כלי מיד. ענה תמיד בעברית בלבד."""
 
 # === PERSONAS - צוות מערכת חדשות עם שיתוף פעולה מלא וכלים ===
 PERSONAS = {
@@ -310,6 +313,42 @@ def execute_agent_tools(agent_name, agent_output, history_str, depth=0):
             if sub_resp:
                 send_to_group(sub_resp)
                 execute_agent_tools(target_persona, sub_resp, history_str + "\n" + agent_output, depth=depth+1)
+
+    # === SMART FALLBACK PARSING: חילוץ פעולות גם אם המודל דיבר בעברית בלי סוגריים מרובעים ===
+    if not pub_match and not prompt_match and not call_match and "[כלי: סריקה]" not in agent_output:
+        # א. חילוץ עדכון פרומפט טבעי (למשל: "מעדכן את הפרומפט של העורך: ...")
+        fallback_prompt = re.search(r"(?:מעדכן את הפרומפט של|עדכון פרומפט ל-|הנחיה חדשה ל-|קובע כלל ל-)\s*([^\n:]+)[:：]\s*([^\n]+)", agent_output)
+        if fallback_prompt:
+            tgt = fallback_prompt.group(1).strip()
+            body = fallback_prompt.group(2).strip()
+            if len(body) > 10 and not any(p in body for p in ["הטקסט", "שם_הסוכן", "..."]):
+                print(f"[{agent_name}] Triggered SMART FALLBACK PROMPT_UPDATE for {tgt}")
+                save_prompt_patch(tgt, body)
+
+        # ב. חילוץ סריקה טבעית
+        if any(k in agent_output for k in ["מפעיל סריקה של כל מקורות", "מבצע סריקה מיידית", "סורק את כל הערוצים"]):
+            print(f"[{agent_name}] Triggered SMART FALLBACK SCAN")
+            try: requests.get(SCANNER_URL, timeout=10)
+            except: pass
+
+        # ג. חילוץ הפעלת סוכן טבעית (למשל: "מפעיל את העורך לנסח...")
+        fallback_call = re.search(r"(?:מפעיל את|מעביר ל-|קורא ל-)\s*@?(עורך|מבקר|מהנדס|אנליסט|עורך ראשי)\s*[:：]?\s*([^\n]+)", agent_output)
+        if fallback_call:
+            tgt_name = fallback_call.group(1).strip()
+            tgt_task = fallback_call.group(2).strip()
+            tgt_p = None
+            if "עורך" in tgt_name and "ראשי" not in tgt_name: tgt_p = "EDITOR"
+            elif "מבקר" in tgt_name: tgt_p = "CRITIC"
+            elif "ראשי" in tgt_name: tgt_p = "FOCUS"
+            elif "מהנדס" in tgt_name: tgt_p = "PROMPT_ENGINEER"
+            elif "אנליסט" in tgt_name: tgt_p = "OSINT"
+            if tgt_p and tgt_p != agent_name:
+                print(f"[{agent_name}] Triggered SMART FALLBACK DELEGATION to {tgt_p}: {tgt_task[:60]}")
+                time.sleep(1.2)
+                sub_r = run_agent(tgt_p, tgt_task, history_str + "\n" + agent_output)
+                if sub_r:
+                    send_to_group(sub_r)
+                    execute_agent_tools(tgt_p, sub_r, history_str + "\n" + agent_output, depth=depth+1)
 
 def main():
     print(f"Starting group_responder GROUP={GROUP_ID} bot={BOT_TOKEN[:6]}...")
