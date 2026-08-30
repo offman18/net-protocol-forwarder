@@ -70,17 +70,18 @@ PERSONAS = {
   "PROMPT_ENGINEER": {
     "tag": "🛠️ מהנדס הפרומפט:",
     "system": """אתה מהנדס הפרומפט והאחראי הטכני על מודלי ה-AI במערכת.
-תפקידך: לנטר את המשובים של העורך והמבקר, לכייל את הסוכנים ולעדכן פרומפטים וכללים.
+תפקידך: לעדכן פרומפטים וכללים באופן מעשי ומיידי באמצעות הכלי.
 
-חוקי עבודה:
-1. כשיש הנחיה לשינוי סגנון/החרגת מילים/הוספת מקורות – עדכן את הפרומפט מיד: [כלי: עדכון_פרומפט: שם_הסוכן: הטקסט]
-2. הסבר בקצרה את השינוי הטכני שבוצע.
+חוקי ברזל (קריטי!):
+1. אסור לחלוטין לפלוט פילוסופיה, הרצאות או לצטט את כל הפרומפט מחדש!
+2. כשיש בקשה לשינוי כלל/סגנון/הנחיה – חובה להפעיל מיד את הכלי: [כלי: עדכון_פרומפט: שם_הסוכן: הכלל המדויק החדש].
+3. פלט התשובה שלך חייב להיות קצר מאוד (משפט אחד בלבד שמאשר את הכלל החדש שהוגדר).
 
 כלים זמינים:
-1. עדכון פרומפט: [כלי: עדכון_פרומפט: שם_הסוכן: הטקסט]
+1. עדכון פרומפט: [כלי: עדכון_פרומפט: עורך: הכלל] או [כלי: עדכון_פרומפט: כל_הסוכנים: הכלל]
 2. בדיקת סריקה: [כלי: סריקה]
 
-סגנון: מקצועי, מדויק, קצר. עברית בלבד."""
+סגנון: טכני, סופר קצר ותכליתי. עברית בלבד."""
   },
   "OSINT": {
     "tag": "🌐 אנליסט מודיעין:",
@@ -208,19 +209,29 @@ def publish_to_channel(text, source_id="manual"):
         send_to_group(f"❌ שגיאה בפרסום לערוץ: {e}")
         return False
 
+def normalize_agent_name(name):
+    if not name: return "ALL"
+    n = str(name).strip()
+    if "עורך" in n and "ראשי" not in n: return "EDITOR"
+    if "מבקר" in n: return "CRITIC"
+    if "מיקוד" in n or "ראשי" in n or "focus" in n.lower(): return "FOCUS"
+    if "מהנדס" in n: return "PROMPT_ENGINEER"
+    return "ALL"
+
 def save_prompt_patch(agent, patch, is_remove=False):
     if not patch or len(patch)<5: return
-    key = "PROMPT_PATCH" if agent=="ALL" else f"PROMPT_PATCH_{agent}"
+    norm_agent = normalize_agent_name(agent)
+    key = "PROMPT_PATCH" if norm_agent=="ALL" else f"PROMPT_PATCH_{norm_agent}"
     if is_remove:
         patch = f"[הסרה] {patch}"
     try:
         if SCANNER_URL:
-            requests.post(SCANNER_URL, json={"action":"setProps", key: patch.strip()[:1000]}, timeout=8)
+            r = requests.post(SCANNER_URL, json={"action":"setProps", key: patch.strip()[:1000]}, timeout=8)
+            print(f"saved {key}: {patch[:80]} | res: {r.text[:60]}")
             if is_remove and len(patch)<30:
                 try: requests.post(SCANNER_URL, json={"action":"deleteProps", key: key}, timeout=8)
                 except: pass
             send_to_group(f"🛠️ פרומפט עודכן בהצלחה ({key}):\n{patch[:250]}")
-            print(f"saved {key}: {patch[:80]}")
     except Exception as e:
         print(f"patch save err {e}")
 
