@@ -184,6 +184,11 @@ def publish_to_channel(text, source_id="manual"):
             send_to_group("🛑 הפרסום נחסם: הטקסט אינו בעברית תקינה.")
             return False
 
+        meta_pattern = r"אין ידיעה|אין חדשות|ללא תוכן חדשותי|אין תוכן חדשותי|ללא תוכן|אין תוכן|אין דיווח|ללא דיווח|זמני תפילה|לוח זמנים|להוסיף reply_to|להוסיף reply|לנסח מחדש|הערת עריכה|הערת ביקורת|טיוטת עורך|הודעת מערכת"
+        if re.search(meta_pattern, clean_text, flags=re.I):
+            send_to_group("🛑 הפרסום נחסם: הטקסט מכיל הערת מטא/הסבר על היעדר תוכן ואינו מבזק חדשותי.")
+            return False
+
         payload = {"type":"PUBLISH_CONTENT","source_id":source_id,"text":clean_text,"reply_to_source_id":None}
         r = requests.post(SYNC_ENDPOINT, json=payload, timeout=12)
         ok = r.status_code==200
