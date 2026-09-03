@@ -8,7 +8,7 @@ on:
 jobs:
   respond:
     runs-on: ubuntu-latest
-    timeout-minutes: 370  # 6h + margin
+    timeout-minutes: 350  # less than cron interval to avoid overlap
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,4 +27,4 @@ jobs:
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
         run: |
           echo "Starting 6h responder GROUP=$EDITOR_GROUP_ID"
-          timeout 21600 python group_responder.py || echo "6h finished"
+          timeout 20400 python group_responder.py || echo "6h finished"

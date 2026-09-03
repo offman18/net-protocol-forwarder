@@ -359,7 +359,7 @@ def main():
     except: pass
     
     start = time.time()
-    DURATION = 6*3600  # 6 hours
+    DURATION = 5.6*3600  # under cron interval to avoid overlap
     last_wake = 0
     
     chat_history = []
