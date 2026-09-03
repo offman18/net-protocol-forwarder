@@ -409,8 +409,13 @@ async def _main():
                                 result.get("final__text") or result.get("text") or 
                                 result.get("content") or "")
                     final_text_to_publish = str(raw_text).strip()
+                    if final_text_to_publish.startswith('{') and ('"action":' in final_text_to_publish or '"final_text"' in final_text_to_publish):
+                        try:
+                            inner = json.loads(final_text_to_publish)
+                            final_text_to_publish = str(inner.get("final_text") or inner.get("text") or "").strip()
+                        except: pass
                     
-                    if final_text_to_publish:
+                    if final_text_to_publish and not final_text_to_publish.startswith('{"'):
                         is_valid_success = True
                         source_id_to_publish = (result.get("sourceid") or result.get("source_id") or 
                                                result.get("source__id") or result.get("id") or "")
