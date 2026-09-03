@@ -384,9 +384,15 @@ def main():
 
     while time.time() - start < DURATION:
         try:
-            # Wake google every 120s quietly
-            if time.time() - last_wake > 120:
-                wake_google()
+            # Watchdog בלבד: מעיר את גוגל רק אם אין פעימה 10 דקות (לא כל 120 שניות - זה שבר את הסורק)
+            if time.time() - last_wake > 600:
+                try:
+                    hr = requests.post(SCANNER_URL, json={"action":"getHeartbeat"}, timeout=10).json()
+                    import time as _t
+                    if _t.time()*1000 - int(hr.get("heartbeat","0")) > 600000:
+                        wake_google()
+                except:
+                    wake_google()
                 last_wake = time.time()
 
             # Poll Telegram updates
