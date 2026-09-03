@@ -235,11 +235,13 @@ def save_prompt_patch(agent, patch, is_remove=False):
         print(f"patch save err {e}")
 
 def wake_google():
-    for url in [SCANNER_URL, SYNC_ENDPOINT]:
-        if not url: continue
-        try: requests.get(url, timeout=30); print(f"woke {url[:40]}")
-        except Exception as e:
-            if "timeout" not in str(e).lower(): print(f"wake err {e}")
+    # watchdog: סריקה רק דרך POST action=scan (GET לא מפעיל כלום)
+    if not SCANNER_URL: return
+    try:
+        requests.post(SCANNER_URL, json={"action":"scan"}, timeout=30)
+        print("woke scanner via POST scan")
+    except Exception as e:
+        if "timeout" not in str(e).lower(): print(f"wake err {e}")
 
 _last_sync_time = 0
 
