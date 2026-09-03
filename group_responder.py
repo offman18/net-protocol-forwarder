@@ -136,11 +136,11 @@ def run_agent(name, user_content, history_text=""):
         return f"{p['tag']} {out}"
     return None
 
-def send_to_group(text):
-    if not BOT_TOKEN or not GROUP_ID: 
+def send_to_group(text, reply_to=None):
+    if not BOT_TOKEN or not GROUP_ID:
         print("missing BOT_TOKEN/GROUP_ID")
         return False
-    
+
     # Ensure correct supergroup prefix -100
     gid = str(GROUP_ID).strip()
     if gid.startswith("-") and not gid.startswith("-100") and len(gid) > 8:
@@ -154,15 +154,23 @@ def send_to_group(text):
     if not display_text:
         return True
 
+    # סדר: הודעה קצרה + שרשור. חתוך הודעות ארוכות
+    if len(display_text) > 900:
+        display_text = display_text[:900] + "…"
+
     try:
+        payload = {"chat_id": gid, "text": display_text, "parse_mode":"HTML", "disable_web_page_preview": True}
+        if reply_to:
+            payload["reply_to_message_id"] = reply_to
         r = requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            json={"chat_id": gid, "text": display_text, "parse_mode":"HTML", "disable_web_page_preview": True},
+            json=payload,
             timeout=10)
         ok = r.status_code==200 and r.json().get("ok")
         if not ok:
             # Fallback to plain text
+            payload.pop("parse_mode", None)
             r = requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                json={"chat_id": gid, "text": display_text, "disable_web_page_preview": True},
+                json=payload,
                 timeout=10)
             ok = r.status_code==200 and r.json().get("ok")
             if not ok: print(f"send fail {r.text[:200]}")
@@ -427,22 +435,22 @@ def main():
                 # Sync full context to Google Apps Script scanner so both systems are in the same universe
                 sync_context_to_scanner(history_str)
 
-                # צינור פשוט עם לולאת משוב: א' <- ב', ב' <- ג', ג' יכול לערוך. הכל גלוי בקבוצה
+                # צינור פשוט עם לולאת משוב + שרשור מסודר: הכל בתשובה להודעת חומר הגלם
                 if is_bot and any(k in text for k in ["חומר גלם", "📎", "טיוטה לפרסום", "📝", "מקורות"]):
                     raw = text[:3000]
-                    # משוב קודם: ביקורת אחרונה של ב' -> א', החלטה אחרונה של ג' -> ב'
+                    thread_id = msg.get("message_id")
                     fb_b = next((m for m in reversed(chat_history) if "בוט ב'" in m[:30]), "")
                     fb_g = next((m for m in reversed(chat_history) if "בוט ג'" in m[:30]), "")
                     a_out = run_agent("EDITOR", f"חומר גלם חדש:\n{raw}\nמשוב קודם של בוט ב' (לתקן הפעם):\n{fb_b[:600]}\nכתוב מבזק אחד (טקסט נקי בלבד).", history_str)
-                    if a_out: send_to_group(a_out); time.sleep(1.0); chat_history.append(a_out); history_str += "\n" + a_out
+                    if a_out: send_to_group(a_out, reply_to=thread_id); time.sleep(1.0); chat_history.append(a_out); history_str += "\n" + a_out
                     b_out = run_agent("CRITIC", f"טיוטה של בוט א':\n{a_out}\nמשוב קודם של בוט ג' (ליישם):\n{fb_g[:600]}\nערוך ובדוק כפילות מול היסטוריית הערוץ.", history_str)
-                    if b_out: send_to_group(b_out); time.sleep(1.0); chat_history.append(b_out); history_str += "\n" + b_out
+                    if b_out: send_to_group(b_out, reply_to=thread_id); time.sleep(1.0); chat_history.append(b_out); history_str += "\n" + b_out
                     if b_out and ("כפילות" in b_out or "לדחות" in b_out or "נדחה" in b_out):
-                        send_to_group("🤖 בוט ג' - המאשר: נדחה (כפילות).")
+                        send_to_group("🤖 בוט ג' - המאשר: נדחה (כפילות).", reply_to=thread_id)
                         continue
                     g_out = run_agent("FOCUS", f"טיוטה ערוכה:\n{b_out}\nאתה יכול גם לערוך ולשפר לפני שליחה. אשר עם [כלי: פרסום: נוסח סופי] או דחה עם נימוק.", history_str)
                     if g_out:
-                        send_to_group(g_out); chat_history.append(g_out)
+                        send_to_group(g_out, reply_to=thread_id); chat_history.append(g_out)
                         execute_agent_tools("FOCUS", g_out, history_str)
                     continue
 
