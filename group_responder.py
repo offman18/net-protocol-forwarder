@@ -431,7 +431,14 @@ def main():
                 sender_label = "מערכת (טיוטה)" if ("טיוטה לפרסום" in text or text.startswith("📝")) else (user_name if not is_bot else "בוט מערכת")
                 chat_history.append(f"[{sender_label}]: {text}")
                 if len(chat_history) > 100: chat_history = chat_history[-100:]
-                history_str = "\n".join(chat_history)
+                # חבר גם 50 אחרונות מהערוץ כדי שהסוכנים יראו כפילויות
+                try:
+                    _hr = requests.post(SCANNER_URL, json={"action":"getHistory"}, timeout=8)
+                    _ch = _hr.json() if _hr.headers.get("content-type","").startswith("application/json") else json.loads(_hr.text)
+                    ch_txt = "\n".join([f"- {h.get('source_id','')}: {h.get('snippet','')[:80]}" for h in _ch[-50:]])
+                    history_str = f"ערוץ (50 אחרונות):\n{ch_txt}\n\nקבוצה (100 אחרונות):\n" + "\n".join(chat_history)
+                except:
+                    history_str = "\n".join(chat_history)
 
                 # Sync full context to Google Apps Script scanner so both systems are in the same universe
                 sync_context_to_scanner(history_str)
@@ -457,8 +464,15 @@ def main():
                         send_to_group("❓ אנא ציין את נוסח המבזק: שלח לערוץ: [טקסט המבזק]")
                         continue
                     
-                    polished = run_agent("EDITOR", f"לטש למבזק חדשותי מוכן לפרסום (1-2 שורות בעברית טבעית): \"{to_pub_raw}\"", history_str)
-                    polished_text = re.sub(r"^.*?:\s*", "", polished or to_pub_raw, count=1).strip()
+                    polished = run_agent("EDITOR", f"לטש למבזק חדשותי מוכן לפרסום (רק טקסט נקי בעברית, בלי JSON): \"{to_pub_raw}\"", history_str)
+                    polished_text = (polished or to_pub_raw).strip()
+                    try:
+                        jm = re.search(r"\{[\s\S]*\}", polished_text)
+                        if jm:
+                            jj = json.loads(jm.group(0))
+                            if jj.get("final_text"): polished_text = jj["final_text"]
+                    except: pass
+                    polished_text = re.sub(r"^[🎯✍️🔍🛠️📝][^:\n]*:\s*", "", polished_text).strip()[:1100]
                     
                     critic = run_agent("CRITIC", f"בדוק טיוטה זו לפרסום מיידי: \"{polished_text}\"", history_str)
                     if critic and ("לא" in critic or "נפסל" in critic):
