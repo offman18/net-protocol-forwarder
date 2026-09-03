@@ -232,8 +232,16 @@ def main():
                     except Exception as e:
                         send_to_group(f"❌ שגיאת ערוך פרומפט: {e}")
                     continue
-                # === החלטת AI איזה כלי להפעיל ===
-                router = run_agent("FOCUS", f"המפעיל כתב בקבוצה: \"{text}\"\nהחלט איזה כלי להפעיל: wake_scanner / publish_to_channel / save_prompt_patch / none. ענה בשורה אחת: כלי: [שם] + הסבר קצר.", f"כלים זמינים: wake_scanner (סרוק חדשות), publish_to_channel (פרסם לערוץ), save_prompt_patch (עדכן פרומפט), none (רק דיון)")
+                # === החלטת AI איזה כלי להפעיל - עם הקשר מלא ===
+                # קודם קבל היסטוריית ערוץ מ-gs1
+                channel_hist = []
+                try:
+                    r = requests.post(SCANNER_URL, json={"action":"getHistory"}, timeout=10)
+                    channel_hist = r.json()
+                except: pass
+                # בנה הקשר עשיר
+                hist_text = f"ערוץ (50 אחרונות): {json.dumps(channel_hist, ensure_ascii=False)[:2000]}\nקבוצה (10 אחרונות): {text}"
+                router = run_agent("FOCUS", f"המפעיל כתב בקבוצה: \"{text}\"\nהקשר מלא: {hist_text}\nהחלט כלי: wake_scanner / publish_to_channel / save_prompt_patch / none. ענה בשורה: כלי: [שם] + הסבר.", f"כלים: wake_scanner / publish_to_channel / save_prompt_patch / none")
                 # אם ה-AI החליט על כלי - בצע, אם לא - המשך לדיון רגיל
                 chosen = ""
                 if router:
@@ -253,17 +261,25 @@ def main():
                         continue
                     elif "publish_to_channel" in router.lower():
                         chosen = "publish"
-                        # חלץ טקסט לפרסום באמצעות AI
                         m = re.search(r"(?:שלח לערוץ|פרסם|publish)\s*[:：]?\s*(.*)", text, re.I)
                         to_pub_raw = m.group(1).strip() if m and m.group(1) else text
-                        # אם ה-router החליט publish אבל אין טקסט ברור - בקש מהעורך לנסח
                         if len(to_pub_raw) < 10:
                             to_pub_raw = text
                         send_to_group(router)
                         send_to_group("✍️ כלי polish: מלטש לפני פרסום...")
-                        polished = run_agent("EDITOR", f"לטש והפוך למבזק מוכן לפרסום: \"{to_pub_raw}\"", f"בקשת מפעיל: {text}")
+                        polished = run_agent("EDITOR", f"לטש והפוך למבזק מוכן לפרסום (רק טקסט נקי, בלי JSON, בלי שדות): \"{to_pub_raw}\"", f"בקשת מפעיל: {text}")
                         if polished:
-                            polished_text = re.sub(r"^.*?:\s*", "", polished, count=1).strip()[:1100]
+                            # חילוץ נקי: מצא JSON וחלץ final_text (בלי replace גנרי שהורס)
+                            polished_text = polished.strip()
+                            try:
+                                jm = re.search(r"\{[\s\S]*\}", polished_text)
+                                if jm:
+                                    j = json.loads(jm.group(0))
+                                    if j.get("final_text"): polished_text = j["final_text"]
+                            except: pass
+                            # הסר תג פרסונה רק אם קיים בהתחלה (🎯/✍️/🔍/🛠️)
+                            polished_text = re.sub(r"^[🎯✍️🔍🛠️][^:\n]*:\s*", "", polished_text).strip()
+                            polished_text = polished_text[:1100]
                             if "לא הבנתי" in polished_text:
                                 send_to_group(polished)
                                 continue
@@ -273,9 +289,6 @@ def main():
                         continue
                     elif "save_prompt_patch" in router.lower():
                         chosen = "patch"
-                        # חלץ פרומפט להצלה
-                        # יטופל בהמשך בבלוק הפאץ'
-                        pass
                     else:
                         # none - המשך לדיון רגיל, שלח את החלטת ה-router כ-FOCUS
                         send_to_group(router)
@@ -306,23 +319,26 @@ def main():
                             continue
                         send_to_group("✍️ כלי polish: מלטש לפני פרסום...")
                         history_text2 = f"בקשת פרסום מהמפעיל: {to_pub_raw}"
-                        polished = run_agent("EDITOR", f"לטש והפוך למבזק מוכן לפרסום בעברית טבעית (בלי 'מילה:' קבוע): \"{to_pub_raw}\"", history_text2)
+                        polished = run_agent("EDITOR", f"לטש והפוך למבזק מוכן לפרסום בעברית טבעית (רק טקסט נקי, בלי JSON): \"{to_pub_raw}\"", history_text2)
                         if polished:
-                            polished_text = re.sub(r"^.*?:\s*", "", polished, count=1).strip()  # הסר "✍️ העורך:"
-                            polished_text = polished_text[:1100]
-                            if "לא הבנתי" in polished_text:
-                                send_to_group(polished)  # בקשת הבהרה מהעורך
+                            pub_text = polished.strip()
+                            try:
+                                jm2 = re.search(r"\{[\s\S]*\}", pub_text)
+                                if jm2:
+                                    j2 = json.loads(jm2.group(0))
+                                    if j2.get("final_text"): pub_text = j2["final_text"]
+                            except: pass
+                            pub_text = re.sub(r"^[🎯✍️🔍🛠️][^:\n]*:\s*", "", pub_text).strip()[:1100]
+                            if "לא הבנתי" in pub_text:
+                                send_to_group(polished)
                                 continue
-                            critic2 = run_agent("CRITIC", f"טיוטה מלוטשת: {polished_text}\nאשר או הצע תיקון קצר", history_text2)
+                            critic2 = run_agent("CRITIC", f"טיוטה מלוטשת: {pub_text}\nאשר או הצע תיקון קצר", history_text2)
                             if critic2:
                                 send_to_group(critic2)
-                                if "אושר" not in critic2 and len(critic2)>20:
-                                    # אם המבקר הציע תיקון - השתמש בו
-                                    pass
-                            publish_to_channel(polished_text, source_id=f"manual_{int(time.time())}")
+                            publish_to_channel(pub_text, source_id=f"manual_{int(time.time())}")
                         else:
-                            send_to_group("❌ כלי polish נכשל, מפרסם גולמי")
-                            publish_to_channel(to_pub_raw, source_id=f"manual_{int(time.time())}")
+                            send_to_group("❌ כלי polish נכשל")
+                            publish_to_channel(to_pub_raw.strip()[:1100], source_id=f"manual_{int(time.time())}")
                     else:
                         send_to_group("❓ כלי publish_to_channel: כתוב: שלח לערוץ: [טקסט מלא, לפחות 10 תווים]")
                     continue
