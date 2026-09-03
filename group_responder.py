@@ -7,16 +7,16 @@ NVIDIA_KEY = os.environ.get("NVIDIA_API_KEY","").strip()
 SCANNER_URL = os.environ.get("SCANNER_URL","").strip()
 SYNC_ENDPOINT = os.environ.get("SYNC_ENDPOINT","").strip()
 
-# Fallback chain for LLM calls (NVIDIA NIM endpoint)
+# Fallback chain for LLM calls (NVIDIA NIM endpoint) - fast first, slow last
 KIMI_MODELS = [
   "moonshotai/kimi-k3",
   "minimaxai/minimax-m3",
   "nvidia/nemotron-3-ultra-550b-a55b",
-  "deepseek-ai/deepseek-v4-pro-0813",
-  "deepseek-ai/deepseek-v4-flash-0731",
   "openai/gpt-oss-20b",
   "nvidia/nemotron-3-nano-30b-a3b",
   "nvidia/nemotron-3-super-120b-a12b",
+  "deepseek-ai/deepseek-v4-pro",
+  "deepseek-ai/deepseek-v4-flash",
 ]
 
 # === UNIFIED TOOLS DEFINITION - מפת כלים מלאה ואיסור דיבורי סרק ===
