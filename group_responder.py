@@ -427,17 +427,20 @@ def main():
                 # Sync full context to Google Apps Script scanner so both systems are in the same universe
                 sync_context_to_scanner(history_str)
 
-                # צינור פשוט: חומר גלם מהסורק (הודעת בוט) -> א' כותב -> ב' עורך -> ג' מאשר ושולח
+                # צינור פשוט עם לולאת משוב: א' <- ב', ב' <- ג', ג' יכול לערוך. הכל גלוי בקבוצה
                 if is_bot and any(k in text for k in ["חומר גלם", "📎", "טיוטה לפרסום", "📝", "מקורות"]):
                     raw = text[:3000]
-                    a_out = run_agent("EDITOR", f"חומר גלם חדש:\n{raw}\nכתוב מבזק אחד (טקסט נקי בלבד).", history_str)
+                    # משוב קודם: ביקורת אחרונה של ב' -> א', החלטה אחרונה של ג' -> ב'
+                    fb_b = next((m for m in reversed(chat_history) if "בוט ב'" in m[:30]), "")
+                    fb_g = next((m for m in reversed(chat_history) if "בוט ג'" in m[:30]), "")
+                    a_out = run_agent("EDITOR", f"חומר גלם חדש:\n{raw}\nמשוב קודם של בוט ב' (לתקן הפעם):\n{fb_b[:600]}\nכתוב מבזק אחד (טקסט נקי בלבד).", history_str)
                     if a_out: send_to_group(a_out); time.sleep(1.0); chat_history.append(a_out); history_str += "\n" + a_out
-                    b_out = run_agent("CRITIC", f"טיוטה של בוט א':\n{a_out}\nערוך ובדוק כפילות מול היסטוריית הערוץ.", history_str)
+                    b_out = run_agent("CRITIC", f"טיוטה של בוט א':\n{a_out}\nמשוב קודם של בוט ג' (ליישם):\n{fb_g[:600]}\nערוך ובדוק כפילות מול היסטוריית הערוץ.", history_str)
                     if b_out: send_to_group(b_out); time.sleep(1.0); chat_history.append(b_out); history_str += "\n" + b_out
                     if b_out and ("כפילות" in b_out or "לדחות" in b_out or "נדחה" in b_out):
                         send_to_group("🤖 בוט ג' - המאשר: נדחה (כפילות).")
                         continue
-                    g_out = run_agent("FOCUS", f"טיוטה ערוכה:\n{b_out}\nאשר ושלח עם [כלי: פרסום: ...] או דחה.", history_str)
+                    g_out = run_agent("FOCUS", f"טיוטה ערוכה:\n{b_out}\nאתה יכול גם לערוך ולשפר לפני שליחה. אשר עם [כלי: פרסום: נוסח סופי] או דחה עם נימוק.", history_str)
                     if g_out:
                         send_to_group(g_out); chat_history.append(g_out)
                         execute_agent_tools("FOCUS", g_out, history_str)
