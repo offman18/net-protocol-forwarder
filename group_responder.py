@@ -486,10 +486,16 @@ def main():
                     polished = run_agent("EDITOR", f"לטש למבזק חדשותי מוכן לפרסום (רק טקסט נקי בעברית, בלי JSON): \"{to_pub_raw}\"", history_str)
                     polished_text = (polished or to_pub_raw).strip()
                     try:
-                        jm = re.search(r"\{[\s\S]*\}", polished_text)
-                        if jm:
-                            jj = json.loads(jm.group(0))
-                            if jj.get("final_text"): polished_text = jj["final_text"]
+                        found = None
+                        for m in re.finditer(r"\{[\s\S]*?\}", polished_text):
+                            try:
+                                jj = json.loads(m.group(0))
+                                if jj.get("final_text"): found = jj["final_text"]; break
+                            except: continue
+                        if found: polished_text = found
+                        elif polished_text.lstrip().startswith("{"):
+                            send_to_group("🛑 נחסם פרסום JSON גולמי")
+                            continue
                     except: pass
                     polished_text = re.sub(r"^[🎯✍️🔍🛠️📝][^:\n]*:\s*", "", polished_text).strip()[:1100]
                     
