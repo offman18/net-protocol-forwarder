@@ -384,17 +384,26 @@ def main():
         except Exception as e:
             print(f"pre-load history err: {e}")
 
+    SCAN_EVERY = 180  # הראנר נוהג בסריקות - גוגל הוא Web API טהור
+    last_scan = 0
     while time.time() - start < DURATION:
         try:
-            # Watchdog בלבד: מעיר את גוגל רק אם אין פעימה 10 דקות (לא כל 120 שניות - זה שבר את הסורק)
+            # נהג ראשי: מפעיל סריקה כל 3 דקות (fire-and-forget, timeout = רץ ברקע)
+            if time.time() - last_scan > SCAN_EVERY:
+                try:
+                    requests.post(SCANNER_URL, json={"action":"scan"}, timeout=8)
+                except Exception as e:
+                    pass  # timeout = הסריקה רצה ברקע
+                last_scan = time.time()
+            # Watchdog: אם אין פעימה 10 דקות - נסה שוב מיד
             if time.time() - last_wake > 600:
                 try:
                     hr = requests.post(SCANNER_URL, json={"action":"getHeartbeat"}, timeout=10).json()
                     import time as _t
                     if _t.time()*1000 - int(hr.get("heartbeat","0")) > 600000:
-                        wake_google()
+                        last_scan = 0
                 except:
-                    wake_google()
+                    last_scan = 0
                 last_wake = time.time()
 
             # Poll Telegram updates
