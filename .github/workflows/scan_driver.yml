@@ -1,0 +1,15 @@
+name: Scan Driver
+on:
+  schedule:
+    - cron: "*/8 * * * *"
+  workflow_dispatch:
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger scanner webapp
+        env:
+          SCANNER_URL: ${{ secrets.SCANNER_URL }}
+        run: |
+          curl -s -m 20 -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"scan"}' -o /dev/null -w "scan %{http_code}\n" || true
