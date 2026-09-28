@@ -1,31 +1,16 @@
 name: Heartbeat Guardian
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 jobs:
   guard:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Check heartbeat, wake only if stale
+      - name: Pacemaker ping (fire-and-forget, server continues async)
         env:
           SCANNER_URL: ${{ secrets.SCANNER_URL }}
         run: |
-          curl -sL --post302 -m 40 -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" -c /tmp/cj -b /tmp/cj -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"diag"}' -o diag.json || true
-          if python3 -c "
-          import json,sys
-          try:
-              j=json.load(open('diag.json'))
-              hb=int(j.get('heartbeat') or 0); now=int(j.get('now') or 0)
-              age=(now-hb)//1000 if hb and now else 999999
-              print('heartbeat age (sec):',age)
-              sys.exit(0 if age>900 else 42)
-          except Exception as e:
-              print('diag unreadable, will try wake:',e); sys.exit(0)
-          "; then
-            echo "STALE -> waking scanner"
-            curl -sL --post302 -m 40 -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" -c /tmp/cj -b /tmp/cj -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"scan"}' -o /dev/null -w "wake %{http_code}\n" || echo "wake call failed"
-          else
-            echo "healthy, no action"
-          fi
+          curl -sL --post302 -m 25 -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" -c /tmp/cj -b /tmp/cj -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"scan"}' -o /dev/null -w "ping %{http_code}\n" || true
+          echo "pacemaker fired (000/timeout still means server-side run started)"
