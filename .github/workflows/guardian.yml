@@ -25,7 +25,7 @@ jobs:
               print('diag unreadable, will try wake:',e); sys.exit(0)
           "; then
             echo "STALE -> waking scanner"
-            curl -sL --post302 -m 40 -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" -c /tmp/cj -b /tmp/cj -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"scan"}' -o /dev/null -w "wake %{http_code}\n" || echo "wake call failed"
+            curl -sL --post302 -m 40 -D - -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" -c /tmp/cj -b /tmp/cj -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"diag"}' -o diag2.json -w "diag2 %{http_code}:%{url_effective}:%{size_download}\n" || true
           else
             echo "healthy, no action"
           fi
