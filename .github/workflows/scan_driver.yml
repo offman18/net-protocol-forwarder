@@ -12,4 +12,4 @@ jobs:
         env:
           SCANNER_URL: ${{ secrets.SCANNER_URL }}
         run: |
-          curl -s -m 20 -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"scan"}' -o /dev/null -w "scan %{http_code}\n" || true
+          curl -sL --post302 -m 60 -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"scan"}' -o /dev/null -w "scan %{http_code}\n" || true

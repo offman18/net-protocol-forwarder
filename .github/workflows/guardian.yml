@@ -12,8 +12,8 @@ jobs:
         env:
           SCANNER_URL: ${{ secrets.SCANNER_URL }}
         run: |
-          curl -s -m 25 -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"diag"}' -o diag.json || exit 0
-          python3 -c "
+          curl -sL --post302 -m 40 -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"diag"}' -o diag.json || true
+          if python3 -c "
           import json,sys
           try:
               j=json.load(open('diag.json'))
@@ -23,4 +23,9 @@ jobs:
               sys.exit(0 if age>900 else 42)
           except Exception as e:
               print('diag unreadable, will try wake:',e); sys.exit(0)
-          " && echo "STALE -> waking scanner" && curl -s -m 20 -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"scan"}' -o /dev/null -w "wake %{http_code}\n" || echo "healthy, no action"
+          "; then
+            echo "STALE -> waking scanner"
+            curl -sL --post302 -m 40 -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"scan"}' -o /dev/null -w "wake %{http_code}\n" || echo "wake call failed"
+          else
+            echo "healthy, no action"
+          fi
