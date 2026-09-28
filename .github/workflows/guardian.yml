@@ -22,5 +22,5 @@ jobs:
               print('heartbeat age (sec):',age)
               sys.exit(0 if age>900 else 42)
           except Exception as e:
-              print('diag parse failed:',e); sys.exit(42)
+              print('diag unreadable, will try wake:',e); sys.exit(0)
           " && echo "STALE -> waking scanner" && curl -s -m 20 -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"scan"}' -o /dev/null -w "wake %{http_code}\n" || echo "healthy, no action"
