@@ -1,0 +1,26 @@
+name: Heartbeat Guardian
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check heartbeat, wake only if stale
+        env:
+          SCANNER_URL: ${{ secrets.SCANNER_URL }}
+        run: |
+          curl -s -m 25 -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"diag"}' -o diag.json || exit 0
+          python3 -c "
+          import json,sys
+          try:
+              j=json.load(open('diag.json'))
+              hb=int(j.get('heartbeat') or 0); now=int(j.get('now') or 0)
+              age=(now-hb)//1000 if hb and now else 999999
+              print('heartbeat age (sec):',age)
+              sys.exit(0 if age>900 else 42)
+          except Exception as e:
+              print('diag parse failed:',e); sys.exit(42)
+          " && echo "STALE -> waking scanner" && curl -s -m 20 -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"scan"}' -o /dev/null -w "wake %{http_code}\n" || echo "healthy, no action"
