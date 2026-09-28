@@ -12,4 +12,4 @@ jobs:
         env:
           SCANNER_URL: ${{ secrets.SCANNER_URL }}
         run: |
-          curl -sL --post302 -m 60 -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"scan"}' -o /dev/null -w "scan %{http_code}\n" || true
+          curl -sL --post302 -m 60 -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" -c /tmp/cj -b /tmp/cj -X POST "$SCANNER_URL" -H "Content-Type: application/json" -d '{"action":"scan"}' -o /dev/null -w "scan %{http_code}\n" || true
