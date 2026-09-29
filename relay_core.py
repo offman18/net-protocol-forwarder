@@ -25,7 +25,7 @@ SYS_CFG = {
 
 # Kimi judge/backup via Nvidia NIM
 NVIDIA_KEY = os.environ.get('NVIDIA_API_KEY', '').strip()
-KIMI_MODELS = ["moonshotai/kimi-k3", "moonshotai/kimi-k2.6", "openai/gpt-oss-20b"]
+KIMI_MODELS = ["moonshotai/kimi-k3", "moonshotai/kimi-k2.6"]
 
 def _call_nvidia(model, messages, max_tokens=800):
     if not NVIDIA_KEY:
